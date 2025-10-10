@@ -1,10 +1,8 @@
 "use client";
 
-
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import TicketFinder from "@/components/TicketFinder";
-
 
 /* ======================
    Tipos / utilidades
@@ -94,11 +92,11 @@ function isValidEmailDotCom(s: string) {
    Helper: fetch por SLUG (y fallback por ID)
    ====================== */
 async function fetchPublicBySlug(slug: string) {
-  const timestamp = Date.now(); // 👈 NUEVO: Para evitar cache
+  const timestamp = Date.now();
   
   const tries = [
-    `/api/rifas/by-slug/${encodeURIComponent(slug)}?_t=${timestamp}`, // 👈 NUEVO
-    `/api/raffles/by-slug/${encodeURIComponent(slug)}?_t=${timestamp}`, // 👈 NUEVO
+    `/api/rifas/by-slug/${encodeURIComponent(slug)}?_t=${timestamp}`,
+    `/api/raffles/by-slug/${encodeURIComponent(slug)}?_t=${timestamp}`,
   ];
   
   for (const url of tries) {
@@ -121,7 +119,7 @@ async function fetchPublicBySlug(slug: string) {
       
       if (data?.ok && data?.raffle) {
         console.log(`✅ Datos cargados exitosamente desde: ${url}`);
-        console.log(`💰 PRECIO DESDE API:`, data.raffle.price); // 👈 NUEVO LOG
+        console.log(`💰 PRECIO DESDE API:`, data.raffle.price);
         return data.raffle;
       }
     } catch (err) {
@@ -163,6 +161,10 @@ export default function RifaSlugPage() {
   const [verifiedTickets, setVerifiedTickets] = useState<VerifiedTicket[]>([]);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
+  // Estados para mensajes de estado
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
   // Archivos
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -177,6 +179,9 @@ export default function RifaSlugPage() {
   // Modal descripción
   const [showDesc, setShowDesc] = useState(false);
 
+  // Modal para galería
+  const [modalMedia, setModalMedia] = useState<GalleryItem | null>(null);
+
   // Datos del participante (sin cédula)
   const [nombre, setNombre] = useState("");
   const [telefono, setTelefono] = useState("");
@@ -185,91 +190,90 @@ export default function RifaSlugPage() {
   /** Índice de institución seleccionada (solo transfer) */
   const [instIndex, setInstIndex] = useState<{ transfer: number }>({ transfer: 0 });
 
-/* 1) Cargar rifa */
-useEffect(() => {
-  let alive = true;
-  
-  (async () => {
-    try {
-      if (!slug) {
+  /* 1) Cargar rifa */
+  useEffect(() => {
+    let alive = true;
+    
+    (async () => {
+      try {
+        if (!slug) {
+          setRaffle(null);
+          setLoading(false);
+          return;
+        }
+
+        console.log("🔍 Buscando rifa con slug:", slug);
+
+        const r = await fetchPublicBySlug(slug);
+        if (!alive) return;
+
+        console.log("🎯 Resultado completo de fetchPublicBySlug:", r);
+        
+        if (!r) {
+          console.error("❌ No se encontró la rifa");
+          setRaffle(null);
+          setLoading(false);
+          return;
+        }
+
+        // --- Extraer galería directamente del resultado ---
+        let gallery: GalleryItem[] = [];
+        
+        // Si ya viene con media.gallery desde el endpoint
+        if (r.media?.gallery && Array.isArray(r.media.gallery)) {
+          gallery = r.media.gallery;
+          console.log("✅ Galería extraída directamente:", gallery);
+        }
+
+        // Ordena por 'order'
+        gallery = gallery.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+        const banner = r?.media?.banner ?? r?.banner_url ?? null;
+        console.log("🖼️ Banner URL:", banner);
+        console.log("📸 Galería final:", gallery);
+
+        // Instituciones bancarias ordenadas
+        const institutions: BankInstitution[] = Array.isArray(r.bank_institutions)
+          ? r.bank_institutions
+          : [];
+        institutions.sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0));
+        
+        console.log("🏦 Instituciones bancarias:", institutions);
+
+        // Actualiza el estado
+        setRaffle({
+          ...r,
+          media: { 
+            banner, 
+            gallery, 
+            logos: r?.media?.logos ?? null 
+          },
+          banner_url: banner ?? undefined,
+          bank_institutions: institutions,
+        });
+
+        // Selecciona la primera institución de transferencia
+        const firstTransferIdx = institutions.findIndex((b) => b.method === "transfer");
+        if (firstTransferIdx >= 0) {
+          setInstIndex({ transfer: firstTransferIdx });
+        }
+
+        setActive(0);
+        setLoading(false);
+        
+        console.log("✅ Estado de la rifa actualizado correctamente");
+
+      } catch (err) {
+        console.error("❌ Error general cargando la rifa:", err);
         setRaffle(null);
         setLoading(false);
-        return;
       }
+    })();
 
-      console.log("🔍 Buscando rifa con slug:", slug);
-
-      const r = await fetchPublicBySlug(slug);
-      if (!alive) return;
-
-      console.log("🎯 Resultado completo de fetchPublicBySlug:", r);
-      
-      if (!r) {
-        console.error("❌ No se encontró la rifa");
-        setRaffle(null);
-        setLoading(false);
-        return;
-      }
-
-      // --- Extraer galería directamente del resultado ---
-      let gallery: GalleryItem[] = [];
-      
-      // Si ya viene con media.gallery desde el endpoint
-      if (r.media?.gallery && Array.isArray(r.media.gallery)) {
-        gallery = r.media.gallery;
-        console.log("✅ Galería extraída directamente:", gallery);
-      }
-
-      // Ordena por 'order'
-      gallery = gallery.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-
-      const banner = r?.media?.banner ?? r?.banner_url ?? null;
-      console.log("🖼️ Banner URL:", banner);
-      console.log("📸 Galería final:", gallery);
-
-      // Instituciones bancarias ordenadas
-      const institutions: BankInstitution[] = Array.isArray(r.bank_institutions)
-        ? r.bank_institutions
-        : [];
-      institutions.sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0));
-      
-      console.log("🏦 Instituciones bancarias:", institutions);
-
-      // Actualiza el estado
-      setRaffle({
-        ...r,
-        media: { 
-          banner, 
-          gallery, 
-          logos: r?.media?.logos ?? null 
-        },
-        banner_url: banner ?? undefined,
-        bank_institutions: institutions,
-      });
-
-      // Selecciona la primera institución de transferencia
-      const firstTransferIdx = institutions.findIndex((b) => b.method === "transfer");
-      if (firstTransferIdx >= 0) {
-        setInstIndex({ transfer: firstTransferIdx });
-      }
-
-      setActive(0);
-      setLoading(false);
-      
-      console.log("✅ Estado de la rifa actualizado correctamente");
-
-    } catch (err) {
-      console.error("❌ Error general cargando la rifa:", err);
-      setRaffle(null);
-      setLoading(false);
-    }
-  })();
-
-  return () => {
-    alive = false;
-  };
-}, [slug]);
-
+    return () => {
+      alive = false;
+    };
+  }, [slug]);
 
   /* Polling verificación de pago */
   useEffect(() => {
@@ -297,69 +301,96 @@ useEffect(() => {
     return () => clearInterval(timer);
   }, [orderPending, paymentId]);
 
-  /* Envío de reserva */
-  async function handleSubmit() {
-    if (!raffle?.id) return;
-    if (!acceptedTerms) return alert("Debes aceptar los términos y condiciones.");
-    if (!selectedFile) return alert("Por favor adjunta la imagen del comprobante.");
-    if (!nombre.trim() || !telefono.trim()) return alert("Por favor completa nombre y teléfono.");
+/* Envío de reserva */
+async function handleSubmit() {
+  if (!raffle?.id) return;
+  if (!acceptedTerms) return alert("Debes aceptar los términos y condiciones.");
+  if (!selectedFile) return alert("Por favor adjunta la imagen del comprobante.");
+  if (!nombre.trim() || !telefono.trim()) return alert("Por favor completa nombre y teléfono.");
 
-    // Validación de email .com si viene
-    if (correo.trim()) {
-      const cleaned = cleanEmail(correo);
-      if (!isValidEmailDotCom(cleaned)) {
-        return alert("Ingresa un email válido que termine en .com");
-      }
-    }
-
-    const transferInstitutions = (raffle.bank_institutions ?? []).filter((b) => b.method === "transfer");
-    const safeIndex = Math.min(Math.max(0, instIndex.transfer), Math.max(0, transferInstitutions.length - 1));
-    const chosen = transferInstitutions[safeIndex];
-
-    try {
-      const up = new FormData();
-      up.append("file", selectedFile!);
-      const resUp = await fetch("/api/upload/voucher", { method: "POST", body: up });
-      const upJson = await resUp.json();
-      if (!resUp.ok || !upJson?.ok) return alert("Error al subir el comprobante.");
-
-      const { url: voucher_url, payment_id } = upJson;
-      setPaymentId(payment_id || null);
-
-      const payload = {
-        raffle_id: raffle.id,
-        nombre,
-        telefono,
-        correo: cleanEmail(correo),
-        pay_method: "transfer",
-        boletos: Array.from({ length: ticketQuantity }, (_, i) => i + 1),
-        payment_id,
-        voucher_url,
-        slug,
-        quantity: ticketQuantity,
-        bank_institution_id: chosen?.id ?? null,
-      };
-
-      const resR = await fetch("/api/orders/create-reservation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const rJson = await resR.json().catch(() => null);
-      if (!resR.ok || !rJson?.ok) return alert("Error al enviar la reserva.");
-
-      setOrderPending(true);
-      setVerifiedTickets([]);
-      setNombre("");
-      setTelefono("");
-      setCorreo("");
-      setSelectedFile(null);
-      setAcceptedTerms(false);
-      alert("Reserva enviada. Validaremos tu pago en breve.");
-    } catch {
-      alert("Error inesperado. Intenta nuevamente.");
+  // Validación de email .com si viene
+  if (correo.trim()) {
+    const cleaned = cleanEmail(correo);
+    if (!isValidEmailDotCom(cleaned)) {
+      return alert("Ingresa un email válido que termine en .com");
     }
   }
+
+  const transferInstitutions = (raffle.bank_institutions ?? []).filter((b) => b.method === "transfer");
+  const safeIndex = Math.min(Math.max(0, instIndex.transfer), Math.max(0, transferInstitutions.length - 1));
+  const chosen = transferInstitutions[safeIndex];
+
+  setIsSubmitting(true);
+  setSubmitSuccess(false);
+
+  try {
+    // 1. Subir comprobante
+    const up = new FormData();
+    up.append("file", selectedFile!);
+    const resUp = await fetch("/api/upload/voucher", { method: "POST", body: up });
+    const upJson = await resUp.json();
+    
+    if (!resUp.ok || !upJson?.ok) {
+      setIsSubmitting(false);
+      return alert("Error al subir el comprobante.");
+    }
+
+    const { url: voucher_url, payment_id } = upJson;
+    setPaymentId(payment_id || null);
+
+    // 2. Crear reserva
+    const payload = {
+      raffle_id: raffle.id,
+      nombre,
+      telefono,
+      correo: cleanEmail(correo),
+      pay_method: "transfer",
+      boletos: Array.from({ length: ticketQuantity }, (_, i) => i + 1),
+      payment_id,
+      voucher_url,
+      slug,
+      quantity: ticketQuantity,
+      bank_institution_id: chosen?.id ?? null,
+    };
+
+    const resR = await fetch("/api/orders/create-reservation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const rJson = await resR.json().catch(() => null);
+    
+    if (!resR.ok || !rJson?.ok) {
+      setIsSubmitting(false);
+      return alert("Error al enviar la reserva.");
+    }
+
+    // 3. Éxito inmediato - resetear todo
+    setIsSubmitting(false);
+    setSubmitSuccess(true);
+    
+    // Limpiar formulario
+    setNombre("");
+    setTelefono("");
+    setCorreo("");
+    setSelectedFile(null);
+    setAcceptedTerms(false);
+    setTicketQuantity(1);
+    
+    // Scroll al mensaje de éxito
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    // Resetear el mensaje de éxito después de 20 segundos
+    setTimeout(() => {
+      setSubmitSuccess(false);
+    }, 20000);
+    
+  } catch (error) {
+    console.error("Error en handleSubmit:", error);
+    setIsSubmitting(false);
+    alert("Error inesperado. Intenta nuevamente.");
+  }
+}
 
   /* Búsqueda unificada (tel / email / 4 dígitos) con fallbacks para evitar 404 */
   async function handleUnifiedSearch() {
@@ -472,17 +503,23 @@ useEffect(() => {
 
   if (!raffle?.id) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black flex items-center justify-center p-4">
-        <div className="text-center">
-          <div className="text-6xl mb-4">🎫</div>
-          <p className="text-red-400 text-xl font-bold">Rifa no encontrada</p>
-          <p className="text-gray-400 mt-2">Verifica el enlace e intenta nuevamente</p>
-        </div>
-      </div>
+      <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black p-6">
+        <h1 className="text-2xl font-bold text-white mb-4">
+          Participa dejando tus datos
+        </h1>
+        {/* tu formulario simple de captura */}
+        <form className="space-y-4 max-w-md">
+          <input className="w-full px-4 py-3 rounded bg-black/40 border border-gray-700 text-white" placeholder="Nombre" />
+          <input className="w-full px-4 py-3 rounded bg-black/40 border border-gray-700 text-white" placeholder="Teléfono" />
+          <input className="w-full px-4 py-3 rounded bg-black/40 border border-gray-700 text-white" placeholder="Email" />
+          <button className="w-full py-3 rounded bg-orange-600 text-white font-bold">Enviar</button>
+        </form>
+      </main>
     );
   }
-console.log("✅ Banner URL:", raffle.media?.banner || raffle.banner_url);
-  console.log("🖼️ Galería:", raffle.media?.gallery)
+
+  console.log("✅ Banner URL:", raffle.media?.banner || raffle.banner_url);
+  console.log("🖼️ Galería:", raffle.media?.gallery);
 
   /* Datos derivados */
   const bannerUrl = raffle.media?.banner || raffle.banner_url || "/banner-raffle.jpg";
@@ -503,28 +540,28 @@ console.log("✅ Banner URL:", raffle.media?.banner || raffle.banner_url);
   const safeIndex = Math.min(Math.max(0, instIndex.transfer), Math.max(0, transferInstitutions.length - 1));
   const currentInstitution = transferInstitutions[safeIndex];
   const activeBrand = currentInstitution ? brandColor(currentInstitution.name || "") : brandColor("");
-// ---- helpers onError para evitar loops de carga ----
-const safeImgOnError = (e: React.SyntheticEvent<HTMLImageElement>) => {
-  const img = e.currentTarget;
-  if (img.dataset.fallbackApplied) return;
-  img.dataset.fallbackApplied = "1";
-  img.src = "/img-fallback.png"; // pon un placeholder local en /public
-  img.classList.add("opacity-40");
-};
 
-// ✅ CORRECTO
-const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-  const v = e.currentTarget;
-  if (v.dataset.fallbackApplied) return;
-  v.dataset.fallbackApplied = "1";  // ← Forma correcta de asignar
-  v.poster = "/video-fallback.png"; // opcional
-  v.classList.add("opacity-40");
-};
+  // ---- helpers onError para evitar loops de carga ----
+  const safeImgOnError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    if (img.dataset.fallbackApplied) return;
+    img.dataset.fallbackApplied = "1";
+    img.src = "/img-fallback.png";
+    img.classList.add("opacity-40");
+  };
+
+  const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const v = e.currentTarget;
+    if (v.dataset.fallbackApplied) return;
+    v.dataset.fallbackApplied = "1";
+    v.poster = "/video-fallback.png";
+    v.classList.add("opacity-40");
+  };
 
   /* Render */
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
-      {/* Header con precio por ticket (más grande) */}
+      {/* Header con precio por ticket */}
       <div className="sticky top-0 z-50 bg-black/95 backdrop-blur-md border-b border-orange-500/20">
         <div className="max-w-2xl mx-auto px-4 py-3 flex justify-between items-center">
           <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-wider">{raffle.title}</h1>
@@ -535,67 +572,89 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         </div>
       </div>
 
-     <img
-  src={bannerUrl}
-  alt="Banner"
-  className="w-full h-[250px] sm:h-[350px] object-cover"
-  onError={(e) => {
-    const img = e.currentTarget as HTMLImageElement;
-    if (img.dataset.fallbackApplied) return;         // ← evita bucle
-    img.dataset.fallbackApplied = "1";
-    img.src = "/img-fallback.png";                   // ← placeholder local
-  }}
-/>
-
-
- {/* 🖼️ Galería adicional (con carga/errores) */}
-{Array.isArray(raffle?.media?.gallery) && raffle.media!.gallery.length > 0 ? (
-  <div className="mt-6 px-4">
-    <h3 className="text-white font-bold uppercase mb-3 text-sm tracking-wider">Galería</h3>
-
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-      {raffle.media!.gallery.map((item) => (
-        <div
-          key={item.id}
-          className="group relative rounded-xl overflow-hidden border border-gray-700 bg-black"
-        >
-          {item.type === "video" ? (
-            <video
-              src={item.url}
-              controls
-              playsInline
-              preload="metadata"
-              className="block w-full h-40 object-cover"
-              onError={safeVideoOnError}
-              onLoadedData={() => console.log("🎥 Video OK:", item.url)}
-            />
-          ) : (
-            <img
-              src={item.url}
-              alt="media"
-              loading="lazy"
-              referrerPolicy="no-referrer"
-              crossOrigin="anonymous"
-              className="block w-full h-40 object-cover"
-              onError={safeImgOnError}
-              onLoad={() => console.log("🖼️ Imagen OK:", item.url)}
-            />
-          )}
-
-          <span className="pointer-events-none absolute bottom-1 right-1 text-[10px] px-1 rounded bg-black/60 text-white opacity-0 group-hover:opacity-100 transition">
-            {item.type.toUpperCase()}
-          </span>
+      {/* Banner con marco bonito */}
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        <div className="relative rounded-3xl overflow-hidden shadow-2xl border-4 border-orange-500/30">
+          <img
+            src={bannerUrl}
+            alt="Banner"
+            className="w-full h-[280px] sm:h-[400px] object-cover"
+            onError={(e) => {
+              const img = e.currentTarget as HTMLImageElement;
+              if (img.dataset.fallbackApplied) return;
+              img.dataset.fallbackApplied = "1";
+              img.src = "/img-fallback.png";
+            }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none"></div>
         </div>
-      ))}
-    </div>
-  </div>
-) : (
-  <p className="text-gray-400 text-center mt-4">No hay galería disponible.</p>
-)}
+      </div>
 
+      {/* Galería con modal al hacer click */}
+      {Array.isArray(raffle?.media?.gallery) && raffle.media!.gallery.length > 0 && (
+        <div className="max-w-4xl mx-auto px-4 mt-6">
+          <h3 className="text-white font-bold uppercase mb-3 text-sm tracking-wider">Galería</h3>
 
-      {/* La descripción ya no tapa la galería */}
-      <main className="max-w-2xl mx-auto px-4 mt-2 sm:mt-0 relative z-10 pb-20 space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {raffle.media!.gallery.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setModalMedia(item)}
+                className="group relative rounded-xl overflow-hidden border border-gray-700 bg-black hover:border-orange-500 transition-all cursor-pointer"
+              >
+                {item.type === "video" ? (
+                  <video
+                    src={item.url}
+                    playsInline
+                    preload="metadata"
+                    className="block w-full h-40 object-cover pointer-events-none"
+                    onError={safeVideoOnError}
+                  />
+                ) : (
+                  <img
+                    src={item.url}
+                    alt="media"
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    crossOrigin="anonymous"
+                    className="block w-full h-40 object-cover"
+                    onError={safeImgOnError}
+                  />
+                )}
+
+                <span className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all"></span>
+                <span className="pointer-events-none absolute bottom-2 right-2 text-xs px-2 py-1 rounded bg-black/60 text-white">
+                  {item.type === "video" ? "▶️" : "🖼️"}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Main content */}
+      <main className="max-w-2xl mx-auto px-4 mt-6 relative z-10 pb-20 space-y-4">
+        {/* Mensaje de éxito después de enviar */}
+        {submitSuccess && (
+          <div className="bg-gradient-to-br from-green-900/60 to-emerald-900/60 rounded-2xl p-6 border border-green-500/40 shadow-xl">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center shadow-lg">
+                <span className="text-white text-2xl font-bold">✓</span>
+              </div>
+              <div>
+                <h3 className="text-white font-bold text-lg">¡Reserva enviada exitosamente!</h3>
+                <p className="text-green-200 text-sm">Tu solicitud ha sido recibida</p>
+              </div>
+            </div>
+            <div className="bg-black/30 rounded-xl p-4 mt-4">
+              <p className="text-white text-sm leading-relaxed">
+                ⏳ <strong>Estamos validando tu pago.</strong> En breve recibirás la confirmación de tus boletos.
+                Te notificaremos por WhatsApp y correo electrónico.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Descripción con modal */}
         {raffle.description && raffle.description.trim() && (
           <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 shadow-xl border border-gray-700">
@@ -624,8 +683,7 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 shadow-2xl border border-orange-500/30">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="text-sm text-gray-400 uppercase tracking-wide">Precio unitario</div>
-              <div className="text-2xl font-black text-orange-400">{formatRD(price)}</div>
+              <div className="text-sm text-gray-400 uppercase tracking-wide">Precio unitario</div><div className="text-2xl font-black text-orange-400">{formatRD(price)}</div>
             </div>
             <div className="text-right">
               <div className="text-sm text-gray-400 uppercase tracking-wide">Cantidad</div>
@@ -675,7 +733,7 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
           </div>
         )}
 
-        {/* Datos del participante (inputs MÁS GRANDES) */}
+        {/* Datos del participante */}
         <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 shadow-xl border border-gray-700">
           <h3 className="text-white font-black uppercase mb-4 text-sm tracking-wider flex items-center gap-2">
             <div className="w-1 h-5 bg-orange-500 rounded-full"></div>
@@ -690,7 +748,8 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
               <input
                 value={nombre}
                 onChange={(e) => setNombre(e.target.value)}
-                className="w-full px-5 py-4 bg-black/50 border border-gray-700 rounded-2xl focus:border-orange-500 focus:outline-none text-white placeholder-gray-500 text-base"
+                disabled={isSubmitting}
+                className="w-full px-5 py-4 bg-black/50 border border-gray-700 rounded-2xl focus:border-orange-500 focus:outline-none text-white placeholder-gray-500 text-base disabled:opacity-50"
                 placeholder="Escribe tu nombre"
               />
             </div>
@@ -700,13 +759,17 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
                 Teléfono WhatsApp
               </label>
               <div className="flex gap-3">
-                <select className="px-4 py-4 bg-black/50 border border-gray-700 rounded-2xl focus:border-orange-500 focus:outline-none text-white text-base">
+                <select 
+                  disabled={isSubmitting}
+                  className="px-4 py-4 bg-black/50 border border-gray-700 rounded-2xl focus:border-orange-500 focus:outline-none text-white text-base disabled:opacity-50"
+                >
                   <option>+1</option>
                 </select>
                 <input
                   value={telefono}
                   onChange={(e) => setTelefono(formatPhoneRD(e.target.value))}
-                  className="flex-1 px-5 py-4 bg-black/50 border border-gray-700 rounded-2xl focus:border-orange-500 focus:outline-none text-white placeholder-gray-500 text-base"
+                  disabled={isSubmitting}
+                  className="flex-1 px-5 py-4 bg-black/50 border border-gray-700 rounded-2xl focus:border-orange-500 focus:outline-none text-white placeholder-gray-500 text-base disabled:opacity-50"
                   placeholder="(809)-000-0000"
                 />
               </div>
@@ -719,8 +782,9 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
               <input
                 value={correo}
                 onChange={(e) => setCorreo(cleanEmail(e.target.value))}
+                disabled={isSubmitting}
                 inputMode="email"
-                className="w-full px-5 py-4 bg-black/50 border border-gray-700 rounded-2xl focus:border-orange-500 focus:outline-none text-white placeholder-gray-500 text-base"
+                className="w-full px-5 py-4 bg-black/50 border border-gray-700 rounded-2xl focus:border-orange-500 focus:outline-none text-white placeholder-gray-500 text-base disabled:opacity-50"
                 placeholder="tu@email.com"
               />
             </div>
@@ -734,7 +798,7 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
             Información de pago
           </h3>
 
-          {/* logos más grandes */}
+          {/* logos bancarios */}
           {transferInstitutions.length > 0 && (
             <div className="grid grid-cols-3 gap-4 mb-5">
               {transferInstitutions.map((bi, i) => {
@@ -744,23 +808,24 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
                   <button
                     key={bi.id}
                     type="button"
+                    disabled={isSubmitting}
                     onClick={() => setInstIndex({ transfer: i })}
                     className={[
                       "rounded-2xl flex items-center justify-center border transition-all",
-                      "bg-gradient-to-br from-gray-700 to-gray-800 h-28", // ↑ más alto
+                      "bg-gradient-to-br from-gray-700 to-gray-800 h-28",
                       isActive ? `border-transparent ring-4 ${color.ring}` : "border-gray-600 hover:border-orange-500",
+                      isSubmitting && "opacity-50 cursor-not-allowed"
                     ].join(" ")}
                     title={bi.name}
                   >
-                   {bi.logo_url ? (
-  <img
-    src={bi.logo_url}
-    alt={bi.name}
-    className="w-16 h-16 object-contain"
-    onError={safeImgOnError}
-  />
-) : (
-
+                    {bi.logo_url ? (
+                      <img
+                        src={bi.logo_url}
+                        alt={bi.name}
+                        className="w-16 h-16 object-contain"
+                        onError={safeImgOnError}
+                      />
+                    ) : (
                       <span className="text-white font-bold text-sm">{bi.name.slice(0, 10)}</span>
                     )}
                   </button>
@@ -778,15 +843,14 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
               ].join(" ")}
             >
               <div className="text-white/90 font-bold mb-3 text-sm flex items-center gap-2">
-               {currentInstitution.logo_url && (
-  <img
-    src={currentInstitution.logo_url}
-    className="w-6 h-6 object-contain"
-    alt=""
-    onError={safeImgOnError}
-  />
-)}
-
+                {currentInstitution.logo_url && (
+                  <img
+                    src={currentInstitution.logo_url}
+                    className="w-6 h-6 object-contain"
+                    alt=""
+                    onError={safeImgOnError}
+                  />
+                )}
                 {currentInstitution.name}
                 <span className="text-xs text-gray-400">(Transferencia)</span>
               </div>
@@ -858,8 +922,11 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
           <div
             onDrop={onDrop}
             onDragOver={(e) => e.preventDefault()}
-            className="border-2 border-dashed border-gray-600 rounded-2xl p-8 text-center hover:border-orange-500 transition-all cursor-pointer bg-black/30"
-            onClick={() => fileInputRef.current?.click()}
+            className={[
+              "border-2 border-dashed border-gray-600 rounded-2xl p-8 text-center hover:border-orange-500 transition-all cursor-pointer bg-black/30",
+              isSubmitting && "opacity-50 cursor-not-allowed pointer-events-none"
+            ].join(" ")}
+            onClick={() => !isSubmitting && fileInputRef.current?.click()}
           >
             {selectedFile ? (
               <div>
@@ -867,7 +934,7 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
                   <span className="text-white text-3xl font-bold">✓</span>
                 </div>
                 <p className="font-semibold text-white text-sm break-all px-2">{selectedFile.name}</p>
-                <p className="text-xs text-gray-400 mt-2">Toca para cambiar</p>
+                {!isSubmitting && <p className="text-xs text-gray-400 mt-2">Toca para cambiar</p>}
               </div>
             ) : (
               <div>
@@ -882,6 +949,7 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              disabled={isSubmitting}
               className="hidden"
               onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
             />
@@ -892,8 +960,9 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
               type="checkbox"
               id="terms"
               checked={acceptedTerms}
+              disabled={isSubmitting}
               onChange={(e) => setAcceptedTerms(e.target.checked)}
-              className="mt-0.5 w-5 h-5 accent-orange-500 cursor-pointer"
+              className="mt-0.5 w-5 h-5 accent-orange-500 cursor-pointer disabled:cursor-not-allowed"
             />
             <label htmlFor="terms" className="text-xs text-gray-300 cursor-pointer">
               Acepto los términos y condiciones del sorteo
@@ -901,19 +970,32 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
           </div>
         </div>
 
-        {/* Confirmar */}
+      {/* Confirmar */}
 <button
   onClick={handleSubmit}
-  disabled={!acceptedTerms || orderPending}
-  className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white text-xl font-black uppercase py-5 rounded-2xl hover:from-orange-600 hover:to-orange-700 transition-all disabled:from-gray-700 disabled:to-gray-800 disabled:cursor-not-allowed shadow-2xl shadow-orange-500/20 active:scale-[0.98]"
+  disabled={!acceptedTerms || isSubmitting}
+  className={[
+    "w-full text-white text-xl font-black uppercase py-5 rounded-2xl transition-all shadow-2xl active:scale-[0.98]",
+    isSubmitting 
+      ? "bg-gradient-to-r from-blue-500 to-blue-600 cursor-wait"
+      : !acceptedTerms
+      ? "bg-gradient-to-r from-gray-700 to-gray-800 cursor-not-allowed"
+      : "bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 shadow-orange-500/20"
+  ].join(" ")}
 >
-  {orderPending ? "PROCESANDO..." : "CONFIRMAR RESERVA"}
+  {isSubmitting ? (
+    <div className="flex items-center justify-center gap-3">
+      <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
+      <span>RESERVANDO...</span>
+    </div>
+  ) : (
+    "CONFIRMAR RESERVA"
+  )}
 </button>
 
-{/* 🔹 Nuevo buscador de boletos */}
-<TicketFinder raffleId={raffle.id} />
-
-</main>  {/* 👈 asegúrate de tener este cierre aquí */}
+        {/* Buscador de boletos */}
+        <TicketFinder raffleId={raffle.id} />
+      </main>
 
       {/* MODAL: descripción completa */}
       <DescriptionModal
@@ -921,6 +1003,12 @@ const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         onClose={() => setShowDesc(false)}
         title={raffle.title}
         description={raffle.description ?? ""}
+      />
+
+      {/* MODAL: galería media */}
+      <MediaModal
+        media={modalMedia}
+        onClose={() => setModalMedia(null)}
       />
     </div>
   );
@@ -972,6 +1060,85 @@ function DescriptionModal({ open, onClose, title, description }: DescriptionModa
           <button onClick={onClose} className="px-4 py-2 rounded-lg font-semibold bg-gray-700 text-white hover:bg-gray-600">
             Cerrar
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===========================
+   MODAL: Galería (imagen/video)
+   =========================== */
+type MediaModalProps = {
+  media: GalleryItem | null;
+  onClose: () => void;
+};
+
+function MediaModal({ media, onClose }: MediaModalProps) {
+  if (!media) return null;
+
+  function onKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "Escape") onClose();
+  }
+
+  const safeImgOnError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    if (img.dataset.fallbackApplied) return;
+    img.dataset.fallbackApplied = "1";
+    img.src = "/img-fallback.png";
+    img.classList.add("opacity-40");
+  };
+
+  const safeVideoOnError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const v = e.currentTarget;
+    if (v.dataset.fallbackApplied) return;
+    v.dataset.fallbackApplied = "1";
+    v.poster = "/video-fallback.png";
+    v.classList.add("opacity-40");
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      onKeyDown={onKey}
+      role="dialog"
+      aria-modal="true"
+    >
+      {/* Backdrop */}
+      <button 
+        aria-label="Cerrar" 
+        onClick={onClose} 
+        className="absolute inset-0 bg-black/90 backdrop-blur-sm" 
+      />
+
+      {/* Panel */}
+      <div className="relative w-full max-w-5xl">
+        <button 
+          onClick={onClose} 
+          className="absolute -top-12 right-0 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center backdrop-blur-md transition-all z-10" 
+          title="Cerrar"
+        >
+          ✕
+        </button>
+
+        <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10">
+          {media.type === "video" ? (
+            <video
+              src={media.url}
+              controls
+              autoPlay
+              playsInline
+              className="w-full max-h-[80vh] object-contain"
+              onError={safeVideoOnError}
+            />
+          ) : (
+            <img
+              src={media.url}
+              alt="Media"
+              className="w-full max-h-[80vh] object-contain"
+              onError={safeImgOnError}
+            />
+          )}
         </div>
       </div>
     </div>
