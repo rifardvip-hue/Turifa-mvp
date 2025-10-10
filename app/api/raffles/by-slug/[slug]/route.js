@@ -5,19 +5,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-export async function GET(req: Request, ctx: { params: { slug?: string } }) {
+export async function GET(req, ctx) {
   try {
-    const slug = ctx.params?.slug || "";
-
+    const slug = ctx?.params?.slug || "";
     if (!slug) {
-      return NextResponse.json(
-        { ok: false, error: "slug requerido" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "slug requerido" }, { status: 400 });
     }
 
     const { data: raffle, error } = await supabase
@@ -40,13 +36,10 @@ export async function GET(req: Request, ctx: { params: { slug?: string } }) {
       .eq("slug", slug)
       .maybeSingle();
 
-    if (error)
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (!raffle) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
 
-    if (!raffle)
-      return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
-
-    const gallery = (raffle.raffle_media || []).map((m: any) => ({
+    const gallery = (raffle.raffle_media || []).map(m => ({
       id: m.id,
       type: m.type,
       url: m.url,
@@ -61,19 +54,12 @@ export async function GET(req: Request, ctx: { params: { slug?: string } }) {
       price: Number(raffle.price ?? 0),
       bank_instructions: raffle.bank_instructions ?? null,
       banner_url: raffle.banner_url ?? null,
-      media: {
-        banner: raffle.banner_url ?? null,
-        gallery,
-        logos: null,
-      },
+      media: { banner: raffle.banner_url ?? null, gallery, logos: null },
       bank_institutions: raffle.bank_institutions ?? [],
     };
 
     return NextResponse.json({ ok: true, raffle: payload });
-  } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || "error" },
-      { status: 500 }
-    );
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e?.message || "error" }, { status: 500 });
   }
 }
