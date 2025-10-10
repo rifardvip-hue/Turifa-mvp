@@ -12,8 +12,9 @@ const supabase = createClient(url, serviceKey, { auth: { persistSession: false }
 
 export async function GET(
   _req: Request,
-  { params }: { params: Record<string, string> }
+  { params }: any
 )
+
  {
   try {
     const slug = params?.slug || "";
