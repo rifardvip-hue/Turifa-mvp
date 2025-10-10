@@ -11,10 +11,10 @@ const supabase = createClient(url, serviceKey, { auth: { persistSession: false }
 
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ slug: string }> }
+  context: { params: { slug: string } }
 ) {
   try {
-    const { slug } = await params;
+    const slug = context?.params?.slug || "";
     if (!slug) {
       return NextResponse.json({ ok: false, error: "slug requerido" }, { status: 400 });
     }
