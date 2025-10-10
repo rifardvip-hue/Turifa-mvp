@@ -10,7 +10,8 @@ const admin = createClient(
 );
 
 // GET /api/rifas/:id  -> busca por ID en la tabla "raffles"
-export async function GET(_: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, context: any) {
+  const id = String(context?.params?.id || "");
   try {
     const { data, error } = await admin
       .from("raffles")
@@ -25,7 +26,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
         media,
         created_at
       `)
-      .eq("id", params.id)
+      .eq("id", id)
       .single();
 
     if (error || !data) {

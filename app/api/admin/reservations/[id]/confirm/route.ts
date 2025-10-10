@@ -1,19 +1,24 @@
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 
-export async function POST(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
-  const { id } = params;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-  const cookieStore = await cookies();
+export async function POST(_req: Request, context: any) {
+  const id = String(context?.params?.id || "");
+  if (!id) {
+    return NextResponse.json({ error: "Missing reservation id" }, { status: 400 });
+  }
+
+  // cookies() es síncrono en route handlers
+  const cookieStore = cookies();
   const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
-  const { data: { user } } = await supabaseUser.auth.getUser();
 
+  const { data: { user } = { user: null } } = await supabaseUser.auth.getUser();
   if (!user || user.user_metadata?.role !== "admin") {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const admin = createClient(
@@ -29,11 +34,11 @@ export async function POST(
     .maybeSingle();
 
   if (error || !resv) {
-    return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   if (resv.status === "confirmed") {
-    return Response.json({ ok: true, id: resv.id, status: "confirmed" });
+    return NextResponse.json({ ok: true, id: resv.id, status: "confirmed" });
   }
 
   const { data: updated, error: updErr } = await admin
@@ -48,8 +53,8 @@ export async function POST(
     .maybeSingle();
 
   if (updErr) {
-    return new Response(JSON.stringify({ error: updErr.message }), { status: 400 });
+    return NextResponse.json({ error: updErr.message }, { status: 400 });
   }
 
-  return Response.json({ ok: true, id: updated.id, status: updated.status });
+  return NextResponse.json({ ok: true, id: updated!.id, status: updated!.status });
 }

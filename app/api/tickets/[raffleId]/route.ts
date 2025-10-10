@@ -1,39 +1,41 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin"; // importa tu cliente admin
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-export async function GET(
-  req: Request,
-  { params }: { params: { raffleId: string } }
-) {
-  const { raffleId } = params;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export async function GET(_req: Request, context: any) {
+  const raffleId = String(context?.params?.raffleId || "");
+  if (!raffleId) {
+    return NextResponse.json({ error: "Missing raffleId" }, { status: 400 });
+  }
 
   try {
-    // 1️⃣ Traemos todos los números ya usados/reservados/comprados de la rifa
-    const { data: usedTickets, error: ordersErr } = await supabaseAdmin
+    // 1) Traer números ya usados/reservados/comprados
+    const { data: usedTickets, error } = await supabaseAdmin
       .from("orders")
       .select("numbers")
       .eq("raffle_id", raffleId);
 
-    if (ordersErr) {
-      return NextResponse.json(
-        { error: ordersErr.message },
-        { status: 500 }
-      );
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 2️⃣ Extraemos todos los números tomados
-    const taken = usedTickets?.flatMap((o: any) => o.numbers) ?? [];
+    // 2) Aplanar todos los números tomados
+    const taken = (usedTickets ?? []).flatMap((o: any) => o?.numbers ?? []);
 
-    // 3️⃣ Creamos la lista de todos los boletos (puedes poner 1000 si quieres)
-    const all = Array.from({ length: 100 }, (_, i) => i + 1);
+    // 3) Generar universo total (ajusta si tu rifa tiene otro total)
+    const TOTAL = 100;
+    const all = Array.from({ length: TOTAL }, (_, i) => i + 1);
 
-    // 4️⃣ Filtramos los que aún están disponibles
+    // 4) Filtrar disponibles
     const available = all.filter((n) => !taken.includes(n));
 
-    // 5️⃣ Devolvemos la lista de números disponibles
     return NextResponse.json({ numbers: available });
-  } catch (err: any) {
-    console.error("Error GET tickets:", err);
-    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: "Error interno del servidor", details: e?.message },
+      { status: 500 }
+    );
   }
 }

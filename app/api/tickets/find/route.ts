@@ -18,8 +18,8 @@ function isEmail(x: string) {
 }
 
 export async function GET(req: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookies() });
 
   const { searchParams } = new URL(req.url);
   const raffleId = (searchParams.get("raffle") || "").trim(); // uuid opcional

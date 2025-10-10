@@ -8,8 +8,8 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const admin = createClient(url, key);
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const id = params.id;
+export async function GET(_req: Request, context: any) {
+  const id = String(context?.params?.id || "");
   try {
     const { data, error, status, statusText } = await admin
       .from("raffles")

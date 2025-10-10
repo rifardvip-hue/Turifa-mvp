@@ -15,6 +15,7 @@ type Raffle = {
   slug: string;
   title: string;
   description: string;
+  banner_url?: string | null; // ← agregado para permitir r.banner_url
   media: {
     banner?: string | null;
     gallery: MediaItem[];
@@ -39,7 +40,6 @@ export default function EditRafflePage() {
     const res = await fetch(`/api/admin/raffles/${id}`, { cache: "no-store" });
     const json = await res.json();
     if (json?.ok && json.raffle) {
-      // Aseguramos estructura consistente
       const r = json.raffle as Raffle;
       setRaffle({
         ...r,
@@ -79,7 +79,7 @@ export default function EditRafflePage() {
             ? "video"
             : "image";
           galleryAdds.push({
-            id: `p_${crypto.randomUUID()}`, // prefijo p_ para distinguir “drafts” si quisieras
+            id: `p_${crypto.randomUUID()}`,
             type,
             url: data.url,
             order: nextIndex + i,
@@ -110,7 +110,6 @@ export default function EditRafflePage() {
   function removeMedia(mid: string) {
     if (!raffle) return;
     const newGallery = raffle.media.gallery.filter((m) => m.id !== mid);
-    // Recalcular order
     newGallery.forEach((m, i) => (m.order = i));
     setRaffle({ ...raffle, media: { ...raffle.media, gallery: newGallery } });
   }
@@ -120,10 +119,7 @@ export default function EditRafflePage() {
     const newGallery = [...raffle.media.gallery];
     const target = direction === "up" ? index - 1 : index + 1;
     if (target < 0 || target >= newGallery.length) return;
-    [newGallery[index], newGallery[target]] = [
-      newGallery[target],
-      newGallery[index],
-    ];
+    [newGallery[index], newGallery[target]] = [newGallery[target], newGallery[index]];
     newGallery.forEach((m, i) => (m.order = i));
     setRaffle({ ...raffle, media: { ...raffle.media, gallery: newGallery } });
   }
@@ -131,16 +127,14 @@ export default function EditRafflePage() {
   async function saveRaffle() {
     if (!raffle) return;
     try {
-      // ✅ PATCH admin por ID (coincide con tu backend que hace delete+insert en raffle_media)
       const res = await fetch(`/api/admin/raffles/${raffle.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: raffle.title,
           description: raffle.description,
-          // IMPORTANTE: la API espera media.gallery (no media plano)
           media: {
-            banner: raffle.media.banner ?? null, // si algún día editas banner
+            banner: raffle.media.banner ?? null,
             gallery: raffle.media.gallery.map((g) => ({
               id: g.id,
               type: g.type,

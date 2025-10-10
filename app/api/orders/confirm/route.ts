@@ -39,17 +39,17 @@ async function generateUniqueTicketsForOrder(
     attempts++;
     const num = random4int();
 
-    const { error } = await supabase.from("tickets").insert(
-      [
-        {
-          raffle_id,
-          number: num,
-          status: "paid", // cumple con CHECK ('free','reserved','paid','expired')
-          reservation_expires_at: null,
-        },
-      ],
-      { returning: "minimal" }
-    );
+   const { error } = await supabase
+  .from("tickets")
+  .insert([
+    {
+      raffle_id,
+      number: num,
+      status: "paid",
+      reservation_expires_at: null,
+    },
+  ]);
+
 
     if (!error) {
       created.push(num);

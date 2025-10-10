@@ -1,42 +1,32 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export async function PATCH(request: Request, context: any) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
-    const { id } = params;
-    
-    console.log('📝 Intentando actualizar rifa:', id);
-
-    // Verifica autenticación
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      console.error('❌ No autenticado');
-      return NextResponse.json(
-        { ok: false, error: 'No autenticado' },
-        { status: 401 }
-      );
+    const id = String(context?.params?.id || "");
+    if (!id) {
+      return NextResponse.json({ ok: false, error: "Falta id" }, { status: 400 });
     }
 
-    // Lee el body
+    // cookies() es síncrono en route handlers
+    const supabase = createRouteHandlerClient({ cookies: () => cookies() });
+
+    // Verifica autenticación (admin)
+    const { data: { session } = { session: null } } = await supabase.auth.getSession();
+    if (!session) {
+      return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
+    }
+
+    // Body
     const body = await request.json();
-    console.log('📦 Datos recibidos:', body);
+    const { title, description, price, total_tickets, banner_url, slug } = body;
 
-    const { 
-      title, 
-      description, 
-      price, 
-      total_tickets, 
-      banner_url,
-      slug 
-    } = body;
-
-    // Construye el objeto de actualización
-    const updateData: any = {};
+    // Construcción segura del update
+    const updateData: Record<string, any> = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
     if (price !== undefined) updateData.price = price;
@@ -44,43 +34,29 @@ export async function PATCH(
     if (banner_url !== undefined) updateData.banner_url = banner_url;
     if (slug !== undefined) updateData.slug = slug;
 
-    console.log('🔄 Actualizando con:', updateData);
-
-    // Actualiza la rifa
     const { data: raffle, error } = await supabase
-      .from('raffles')
+      .from("raffles")
       .update(updateData)
-      .eq('id', id)
+      .eq("id", id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
-      console.error('❌ Error actualizando rifa:', error);
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
     }
 
-    console.log('✅ Rifa actualizada exitosamente:', raffle);
-
     return NextResponse.json({ ok: true, raffle });
-
-  } catch (error) {
-    console.error('❌ Error en PATCH /api/admin/rifas/[id]/edit:', error);
+  } catch (error: any) {
     return NextResponse.json(
-      { ok: false, error: 'Error interno del servidor' },
+      { ok: false, error: error?.message || "Error interno del servidor" },
       { status: 500 }
     );
   }
 }
 
-// También soporta POST
-export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
-  return PATCH(request, { params });
+// También soporta POST -> reutiliza PATCH
+export async function POST(request: Request, context: any) {
+  return PATCH(request, context);
 }
 
 // Maneja OPTIONS para CORS
@@ -88,9 +64,9 @@ export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
     headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
     },
   });
 }

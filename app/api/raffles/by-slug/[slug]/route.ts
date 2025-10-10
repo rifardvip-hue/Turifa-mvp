@@ -10,17 +10,15 @@ const supabase = createClient(
 );
 
 // ✅ Devuelve una rifa pública con galería, banner y bancos
-export async function GET(
-  req: Request,
-  { params }: { params: { slug: string } }
-) {
+export async function GET(_req: Request, context: any) {
   try {
-    const { slug } = params;
-    if (!slug)
+    const slug = String(context?.params?.slug || "");
+    if (!slug) {
       return NextResponse.json(
         { ok: false, error: "Falta slug" },
         { status: 400 }
       );
+    }
 
     // 1️⃣ Buscar la rifa
     const { data: raffle, error: errRaffle } = await supabase
@@ -29,11 +27,12 @@ export async function GET(
       .eq("slug", slug)
       .single();
 
-    if (errRaffle || !raffle)
+    if (errRaffle || !raffle) {
       return NextResponse.json(
         { ok: false, error: errRaffle?.message || "Rifa no encontrada" },
         { status: 404 }
       );
+    }
 
     // 2️⃣ Cargar su galería desde raffle_media
     const { data: gallery, error: errGallery } = await supabase
@@ -42,11 +41,12 @@ export async function GET(
       .eq("raffle_id", raffle.id)
       .order("order", { ascending: true });
 
-    if (errGallery)
+    if (errGallery) {
       return NextResponse.json(
         { ok: false, error: errGallery.message },
         { status: 500 }
       );
+    }
 
     // 3️⃣ Cargar bancos (si existen)
     const { data: banks } = await supabase

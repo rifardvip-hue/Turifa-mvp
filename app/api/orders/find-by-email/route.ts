@@ -11,7 +11,7 @@ import { cookies } from "next/headers";
  *   - email: email (se normaliza a lower)
  */
 export async function GET(req: Request) {
-  const cookieStore = await cookies();
+  const cookieStore = cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
   const { searchParams } = new URL(req.url);

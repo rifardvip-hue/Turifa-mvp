@@ -1,9 +1,12 @@
-// app/api/admin/orders/[id]/confirm/route.ts
+// ✅ app/api/admin/orders/[id]/confirm/route.ts
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { createClient } from "@supabase/supabase-js";
 import { sendRaffleEmail } from "@/lib/mailer";
 import { buildRaffleEmail } from "@/lib/emailTemplates";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 // Helpers
 function random4int(): number {
@@ -14,7 +17,7 @@ function pad4(n: number): string {
 }
 
 async function generateUniqueTicketsForOrder(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,              // aflojado para evitar conflictos de tipos
   raffle_id: string,
   count: number,
   maxAttempts = 3000
@@ -26,17 +29,20 @@ async function generateUniqueTicketsForOrder(
     attempts++;
     const num = random4int();
 
-    const { error } = await supabase.from("tickets").insert(
-      [
-        {
-          raffle_id,
-          number: num,
-          status: "paid", // cumple tu CHECK
-          reservation_expires_at: null,
-        },
-      ],
-      { returning: "minimal" }
-    );
+    // Tipado defensivo para evitar `never`
+    const { error } = await (supabase as any)
+      .from("tickets")
+      .insert(
+        [
+          {
+            raffle_id,
+            number: num,
+            status: "paid", // cumple tu CHECK
+            reservation_expires_at: null,
+          },
+        ] as any[],
+        { returning: "minimal" }
+      );
 
     if (!error) {
       created.push(num);
@@ -59,14 +65,11 @@ async function generateUniqueTicketsForOrder(
   return created;
 }
 
-export async function POST(
-  _req: Request,
-  ctx: { params: Promise<{ id: string }> }
-) {
-  const { id } = await ctx.params;
+export async function POST(_req: Request, context: any) {
+  const id = String(context?.params?.id || "");
 
   // 1) Validar admin por sesión
-  const cookieStore = await cookies();
+  const cookieStore = cookies(); // ✅ síncrono en route handlers
   const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
   const {
     data: { user },
@@ -113,7 +116,7 @@ export async function POST(
     });
   }
 
-  // 4) Si ya está confirmada y tiene boletos -> idempotencia
+  // 4) Idempotencia: ya confirmada con boletos
   if (order.status === "confirmed" && order.boletos) {
     let tickets: string[] = [];
     try {
@@ -158,7 +161,7 @@ export async function POST(
     .eq("id", order.raffle_id)
     .maybeSingle();
 
-  // 8) Enviar correo (si hay destinatario) — usando el template visual
+  // 8) Enviar correo (si hay destinatario)
   try {
     const to = order.correo || null;
     console.log("✉️ [ADMIN CONFIRM] preparando email…", {
@@ -179,14 +182,12 @@ export async function POST(
         supportEmail: "Rifardvip@gmail.com",
       });
 
-      const info = await sendRaffleEmail({
-        to,
-        subject,
-        text,
-        html,
-      });
-
-      console.log("📩 [ADMIN CONFIRM] Email enviado OK:", info.messageId);
+      const info = await sendRaffleEmail({ to, subject, text, html });
+      if (info.ok) {
+        console.log("📩 [ADMIN CONFIRM] Email enviado OK. id:", (info as any).id);
+      } else {
+        console.warn("⚠️ [ADMIN CONFIRM] fallo al enviar email:", (info as any).error);
+      }
     }
   } catch (e: any) {
     console.error("❌ [ADMIN CONFIRM] fallo enviando email:", e?.message);

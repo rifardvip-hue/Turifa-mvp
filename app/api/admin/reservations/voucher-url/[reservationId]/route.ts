@@ -1,16 +1,49 @@
-// app/api/admin/voucher-url/[reservationId]/route.ts
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { NextResponse } from "next/server";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
 
-export async function GET(_req: Request, { params }: { params: { reservationId: string } }) {
-  const supabase = createRouteHandlerClient({ cookies });
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user || user.user_metadata?.role !== 'admin') return new Response('Unauthorized', { status: 401 });
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-  const { data: resv } = await supabase.from('reservations').select('voucher_url').eq('id', params.reservationId).single();
-  if (!resv?.voucher_url) return new Response('Not found', { status: 404 });
+export async function GET(_req: Request, context: any) {
+  const reservationId = String(context?.params?.reservationId || "");
+  if (!reservationId) {
+    return NextResponse.json({ error: "Missing reservationId" }, { status: 400 });
+  }
 
-  const { data, error } = await supabase.storage.from('vouchers').createSignedUrl(resv.voucher_url.replace('vouchers/', ''), 60);
-  if (error) return new Response(error.message, { status: 400 });
-  return Response.json({ url: data.signedUrl });
+  // cookies() es síncrono en route handlers
+  const supabase = createRouteHandlerClient({ cookies: () => cookies() });
+
+  // Guard: admin
+  const { data: { user } = { user: null } } = await supabase.auth.getUser();
+  if (!user || user.user_metadata?.role !== "admin") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Buscar voucher_url en la reserva
+  const { data: resv, error } = await supabase
+    .from("reservations")
+    .select("voucher_url")
+    .eq("id", reservationId)
+    .maybeSingle();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (!resv?.voucher_url) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  let url = String(resv.voucher_url);
+
+  // Si no es http(s), firmar URL de Storage; se espera "bucket/path/archivo.ext"
+  if (!/^https?:\/\//i.test(url)) {
+    const [bucket, ...rest] = url.split("/");
+    const path = rest.join("/");
+    const { data: signed, error: signErr } = await supabase
+      .storage.from(bucket)
+      .createSignedUrl(path, 60 * 10);
+    if (signErr || !signed?.signedUrl) {
+      return NextResponse.json({ error: signErr?.message || "sign_failed" }, { status: 400 });
+    }
+    url = signed.signedUrl;
+  }
+
+  return NextResponse.json({ url });
 }

@@ -1,16 +1,22 @@
-// app/api/admin/orders/[id]/reject/route.ts
+// ✅ app/api/admin/orders/[id]/reject/route.ts
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { createClient } from "@supabase/supabase-js";
 
-export async function POST(
-  req: Request,
-  ctx: { params: Promise<{ id: string }> }
-) {
-  const { id } = await ctx.params;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-  // 1) Validar admin
-  const cookieStore = await cookies();
+export async function POST(_req: Request, context: any) {
+  const id = String(context?.params?.id || "");
+  if (!id) {
+    return new Response(JSON.stringify({ error: "Missing id" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // 1) Validar admin (cookies() es síncrono)
+  const cookieStore = cookies();
   const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
   const {
     data: { user },
@@ -24,41 +30,25 @@ export async function POST(
     });
   }
 
-  // 2) Service role para actualizar
+  // 2) Cliente admin (service role) para modificar la orden
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-  // 3) Motivo opcional
-  let note = "";
-  try {
-    const body = await req.json().catch(() => ({}));
-    note = (body?.note ?? "").toString().slice(0, 500);
-  } catch {}
-
-  // 4) Rechazar
-  const { data: updated, error: updErr } = await admin
+  // 3) Rechazar orden
+  const { error: updErr } = await admin
     .from("orders")
-    .update({ status: "rejected", notas: note || null })
-    .eq("id", id)
-    .select()
-    .maybeSingle();
+    .update({ status: "rejected" })
+    .eq("id", id);
 
   if (updErr) {
     return new Response(JSON.stringify({ error: updErr.message }), {
-      status: 400,
+      status: 500,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  if (!updated) {
-    return new Response(JSON.stringify({ error: "Not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  return new Response(JSON.stringify({ ok: true, id: updated.id, status: updated.status }), {
+  return new Response(JSON.stringify({ ok: true, id, status: "rejected" }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });

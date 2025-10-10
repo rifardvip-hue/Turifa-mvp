@@ -4,13 +4,21 @@ import React from "react";
 
 type VerifiedTicket = { digits: string; verified: true };
 
-type TicketStackProps = {
+export type TicketStackProps = {
   title?: string;
   priceLabel?: string;
+  /** Tickets verificados (4 dígitos) */
   assigned?: VerifiedTicket[];
+  /** Cantidad de boletos seleccionados (modo antiguo) */
   amount?: number;
+  /** Flag de estado pendiente */
   pending?: boolean;
+  /** Máximo visible en el “stack” */
   maxVisible?: number;
+  /** ✅ Nuevo: lista de boletos seleccionados (números) */
+  tickets?: number[];
+  /** Compat: alias histórico */
+  numbers?: number[];
 };
 
 export default function TicketStack({
@@ -20,25 +28,52 @@ export default function TicketStack({
   amount = 0,
   pending = false,
   maxVisible = 5,
+  tickets,
+  numbers,
 }: TicketStackProps) {
-  const verified = assigned.filter((t) => t.verified && /^[1-9]{4}$/.test(t.digits));
+  // Normaliza selección de boletos numéricos
+  const selected = (tickets ?? numbers ?? []) as number[];
+
+  // Tickets verificados con 4 dígitos
+  const verified = assigned.filter(
+    (t) => t.verified && /^[1-9]{4}$/.test(t.digits)
+  );
+
+  // Determinar modo:
+  // - verified: hay al menos un ticket verificado
+  // - selecting: hay selección numérica (tickets) o amount>0
+  // - pending: default o prop pending
   const mode: "verified" | "pending" | "selecting" =
-    verified.length > 0 ? "verified" : pending ? "pending" : amount > 0 ? "selecting" : "pending";
+    verified.length > 0
+      ? "verified"
+      : (selected && selected.length > 0) || amount > 0
+      ? "selecting"
+      : pending
+      ? "pending"
+      : "pending";
+
+  // Fuente para el stack cuando se está “seleccionando”
+  const selectingCount = selected.length > 0 ? selected.length : amount;
 
   const itemsAll =
     mode === "selecting"
-      ? Array.from({ length: amount }, (_, i) => ({ key: `sel-${i}`, idx: i }))
+      ? Array.from({ length: selectingCount }, (_, i) => ({ key: `sel-${i}`, idx: i }))
       : [{ key: mode === "verified" ? `v-${verified.length}` : `p-1`, idx: 0 }];
 
   const items = mode === "selecting" ? itemsAll.slice(0, maxVisible) : itemsAll;
-  const hiddenCount = mode === "selecting" ? Math.max(0, itemsAll.length - items.length) : 0;
+  const hiddenCount =
+    mode === "selecting" ? Math.max(0, itemsAll.length - items.length) : 0;
 
   const step = 18;
   const containerH = (mode === "selecting" ? items.length : 1) * step + 180;
-  const visibleDigits = mode === "verified" ? verified[verified.length - 1].digits : undefined;
+  const visibleDigits =
+    mode === "verified" ? verified[verified.length - 1].digits : undefined;
 
   return (
-    <div className="relative w-full max-w-sm mx-auto overflow-hidden" style={{ height: containerH, perspective: 1200 }}>
+    <div
+      className="relative w-full max-w-sm mx-auto overflow-hidden"
+      style={{ height: containerH, perspective: 1200 }}
+    >
       {hiddenCount > 0 && mode === "selecting" && (
         <div className="absolute -top-2 -right-2 z-[2000]">
           <span className="text-xs font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow">
@@ -54,14 +89,21 @@ export default function TicketStack({
             className="absolute left-0 right-0 mx-auto origin-top"
             style={{ zIndex: 1000 - idx, transformStyle: "preserve-3d" }}
             initial={{ rotateX: -90, y: 40, opacity: 0 }}
-            animate={{ rotateX: 0, y: idx * step, opacity: 1, rotateZ: mode === "selecting" ? (idx % 2 ? -1 : 1) * 0.4 : 0 }}
+            animate={{
+              rotateX: 0,
+              y: idx * step,
+              opacity: 1,
+              rotateZ: mode === "selecting" ? (idx % 2 ? -1 : 1) * 0.4 : 0,
+            }}
             exit={{ rotateX: 90, y: 40, opacity: 0 }}
             transition={{ type: "spring", stiffness: 280, damping: 18 }}
           >
             <TicketCard
               title={title}
               priceLabel={priceLabel}
-              state={mode === "verified" ? "verified" : mode === "pending" ? "pending" : "selecting"}
+              state={
+                mode === "verified" ? "verified" : mode === "pending" ? "pending" : "selecting"
+              }
               digits={visibleDigits}
               seed={idx}
             />
@@ -158,8 +200,9 @@ function TicketCard({
                   <span
                     key={i}
                     className={`inline-flex items-center justify-center w-[42px] h-12 rounded-md font-extrabold text-[22px] border shadow-sm
-                                ${isVerified ? "bg-white border-amber-300 text-amber-900"
-                                              : "bg-white/85 border-amber-200 text-amber-700/80"}`}
+                                ${isVerified
+                                  ? "bg-white border-amber-300 text-amber-900"
+                                  : "bg-white/85 border-amber-200 text-amber-700/80"}`}
                   >
                     {d}
                   </span>
@@ -179,7 +222,7 @@ function TicketCard({
 }
 
 function ghostDigits(seed: number) {
-  const base = [1,2,3,4,5,6,7,8,9];
+  const base = [1, 2, 3, 4, 5, 6, 7, 8, 9];
   let s = (seed * 73 + 11) % 97;
   const pick = () => base[(s = (s * 5 + 3) % 9)];
   return `${pick()}${pick()}${pick()}${pick()}`;
