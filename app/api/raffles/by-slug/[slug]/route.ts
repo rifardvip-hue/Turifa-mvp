@@ -10,17 +10,8 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; // Service Role en server
 const supabase = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-export async function GET(
-  _req: Request,
-  { params }: any
-)
+export async function GET(req: Request, ctx: any)
 
- {
-  try {
-    const slug = params?.slug || "";
-    if (!slug) {
-      return NextResponse.json({ ok: false, error: "slug requerido" }, { status: 400 });
-    }
 
     // Ajusta nombres de columnas/tablas si difieren
     const { data: raffle, error } = await supabase
