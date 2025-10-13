@@ -16,9 +16,9 @@ const admin = createClient(
 // y archivos del bucket "raffles/raffles/{id}/..."
 export async function DELETE(
   _req: Request,
-  ctx: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = String(ctx?.params?.id || "");
+  const { id } = await params;
   if (!id) {
     return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
   }

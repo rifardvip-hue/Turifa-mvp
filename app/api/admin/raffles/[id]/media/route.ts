@@ -180,7 +180,7 @@ export async function PATCH(
     if (exErr) return NextResponse.json({ ok: false, error: exErr.message }, { status: 400 });
 
     const payloadIds = new Set(
-      payments.map((p: any) => String(p.id || "")).filter((v) => v && !v.startsWith("p_"))
+      payments.map((p: any) => String(p.id || "")).filter((v: string) => v && !v.startsWith("p_"))
     );
     const existingIds = new Set((existing ?? []).map((e: any) => e.id as string));
     const toDelete = [...existingIds].filter((x) => !payloadIds.has(x));

@@ -12,7 +12,7 @@ export async function POST(_req: Request, context: any) {
   const id = String(context?.params?.id || "");
 
   // 1) Validar admin por sesión (usar cookies awaited)
-  const cookieStore = await cookies();
+  const cookieStore = cookies();
   const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
   const {
     data: { user },

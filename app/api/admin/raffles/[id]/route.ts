@@ -23,8 +23,11 @@ function slugify(s: string) {
 }
 
 /* ===================== GET detalle admin ===================== */
-export async function GET(_: Request, ctx: { params: { id: string } }) {
-  const id = String(ctx?.params?.id || "");
+export async function GET(
+  _: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
   if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
   const { data: raffle, error } = await admin
@@ -77,8 +80,11 @@ export async function GET(_: Request, ctx: { params: { id: string } }) {
 }
 
 /* ===================== PATCH actualizar todo (+ slug automático) ===================== */
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
-  const id = String(ctx?.params?.id || "");
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
   if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
   try {
@@ -174,7 +180,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     if (exErr) return NextResponse.json({ ok: false, error: exErr.message }, { status: 400 });
 
     const payloadIds = new Set(
-      payments.map((p: any) => String(p.id || "")).filter((v) => v && !v.startsWith("p_"))
+     payments.map((p: any) => String(p.id || "")).filter((v: string) => v && !v.startsWith("p_"))
     );
     const existingIds = new Set((existing ?? []).map((e: any) => e.id as string));
     const toDelete = [...existingIds].filter((x) => !payloadIds.has(x));
