@@ -6,9 +6,8 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Helper para evitar el warning de cookies()
 function getSupabaseFromRoute() {
-  const cookieStore = cookies();                 // ← capturamos una sola vez
+  const cookieStore = cookies();
   return createRouteHandlerClient({ cookies: () => cookieStore });
 }
 
@@ -22,14 +21,12 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
 
     const { data: raffle, error: raffleError } = await supabase
       .from("raffles")
-      .select(
-        `
+      .select(`
         *,
         bank_institutions (
           id, method, name, account, holder, logo_url, extra, "order"
         )
-      `
-      )
+      `)
       .eq("id", id)
       .maybeSingle();
 
@@ -55,9 +52,9 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       raffle: {
         ...raffle,
         media: {
-          banner: raffle.banner_url ?? raffle.media?.banner ?? null,
+          banner: (raffle as any).banner_url ?? (raffle as any).media?.banner ?? null,
           gallery,
-          payments: raffle.bank_institutions ?? [],
+          payments: (raffle as any).bank_institutions ?? [],
         },
       },
     });
@@ -75,7 +72,6 @@ export async function POST(request: Request, ctx: { params: { id: string } }) {
     const supabase = getSupabaseFromRoute();
 
     const formData = await request.formData();
-    // Acepta "file" o "files"
     const single = (formData.get("file") as File) || null;
     const many = (formData.getAll("files") as File[]).filter(Boolean);
     const files: File[] = single ? [single, ...many] : many;
@@ -117,8 +113,6 @@ export async function POST(request: Request, ctx: { params: { id: string } }) {
       return NextResponse.json({ ok: false, error: "No se pudo subir ningún archivo. Revisa permisos del bucket." }, { status: 500 });
     }
 
-    // La persistencia final de la galería se hace desde PATCH del otro endpoint;
-    // aquí devolvemos URLs para que el cliente las use (p.ej. logo_url).
     return NextResponse.json({ ok: true, gallery: uploaded });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: "Error interno", details: err?.message }, { status: 500 });
@@ -141,7 +135,7 @@ export async function PATCH(request: Request, ctx: { params: { id: string } }) {
 
       if (gallery.length) {
         const rows = gallery.map((g: any, i: number) => ({
-          id: g.id,                                   // si envías id existente lo respeta
+          id: g.id,
           raffle_id: id,
           type: g.type === "video" ? "video" : "image",
           url: g.url,
@@ -170,7 +164,7 @@ export async function PUT(request: Request, ctx: { params: { id: string } }) {
     if (!bank) return NextResponse.json({ ok: false, error: "Falta 'bank' en body" }, { status: 400 });
 
     const payload = {
-      id: bank.id ?? undefined, // si viene undefined → insert, si viene UUID → update
+      id: bank.id ?? undefined,
       raffle_id: id,
       method: bank.type ?? bank.method ?? "transfer",
       name: bank.name ?? "",
