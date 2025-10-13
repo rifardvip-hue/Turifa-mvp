@@ -12,9 +12,9 @@ function getSupabaseFromRoute() {
 }
 
 /* ===================== GET: Media (banner + galería) ===================== */
-export async function GET(_req: Request, ctx: { params: { id: string } }) {
+export async function GET(_req: Request, { params }: any) {
   try {
-    const id = String(ctx?.params?.id || "");
+    const id = String(params?.id || "");
     if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
     const supabase = getSupabaseFromRoute();
@@ -64,9 +64,9 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
 }
 
 /* ===================== POST: Subir archivos (galería / logos) ===================== */
-export async function POST(request: Request, ctx: { params: { id: string } }) {
+export async function POST(request: Request, { params }: any) {
   try {
-    const id = String(ctx?.params?.id || "");
+    const id = String(params?.id || "");
     if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
     const supabase = getSupabaseFromRoute();
@@ -119,10 +119,10 @@ export async function POST(request: Request, ctx: { params: { id: string } }) {
   }
 }
 
-/* ===================== PATCH: Persistir orden/estado de galería ===================== */
-export async function PATCH(request: Request, ctx: { params: { id: string } }) {
+/* ===================== PATCH: Persistir galería ===================== */
+export async function PATCH(request: Request, { params }: any) {
   try {
-    const id = String(ctx?.params?.id || "");
+    const id = String(params?.id || "");
     if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
     const supabase = getSupabaseFromRoute();
@@ -153,9 +153,9 @@ export async function PATCH(request: Request, ctx: { params: { id: string } }) {
 }
 
 /* ===================== PUT: Upsert institución bancaria ===================== */
-export async function PUT(request: Request, ctx: { params: { id: string } }) {
+export async function PUT(request: Request, { params }: any) {
   try {
-    const id = String(ctx?.params?.id || "");
+    const id = String(params?.id || "");
     if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
     const supabase = getSupabaseFromRoute();
@@ -189,9 +189,9 @@ export async function PUT(request: Request, ctx: { params: { id: string } }) {
 }
 
 /* ===================== DELETE: Eliminar institución ===================== */
-export async function DELETE(request: Request, ctx: { params: { id: string } }) {
+export async function DELETE(request: Request, { params }: any) {
   try {
-    const id = String(ctx?.params?.id || "");
+    const id = String(params?.id || "");
     if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
     const supabase = getSupabaseFromRoute();
