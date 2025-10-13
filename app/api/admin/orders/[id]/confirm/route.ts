@@ -8,68 +8,11 @@ import { buildRaffleEmail } from "@/lib/emailTemplates";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Helpers
-function random4int(): number {
-  return Math.floor(Math.random() * 10000); // 0..9999
-}
-function pad4(n: number): string {
-  return n.toString().padStart(4, "0");
-}
-
-async function generateUniqueTicketsForOrder(
-  supabase: any,              // aflojado para evitar conflictos de tipos
-  raffle_id: string,
-  count: number,
-  maxAttempts = 3000
-): Promise<number[]> {
-  const created: number[] = [];
-  let attempts = 0;
-
-  while (created.length < count && attempts < maxAttempts) {
-    attempts++;
-    const num = random4int();
-
-    // Tipado defensivo para evitar `never`
-    const { error } = await (supabase as any)
-      .from("tickets")
-      .insert(
-        [
-          {
-            raffle_id,
-            number: num,
-            status: "paid", // cumple tu CHECK
-            reservation_expires_at: null,
-          },
-        ] as any[],
-        { returning: "minimal" }
-      );
-
-    if (!error) {
-      created.push(num);
-    } else {
-      const msg = (error.message || "").toLowerCase();
-      // si no es conflicto de UNIQUE, abortar
-      if (!(msg.includes("duplicate") || msg.includes("unique") || msg.includes("conflict"))) {
-        console.error("❌ [ADMIN CONFIRM] error insert ticket:", error.message);
-        throw error;
-      }
-      // si fue conflicto, seguir probando
-    }
-  }
-
-  if (created.length < count) {
-    throw new Error(
-      `No fue posible generar todos los boletos (${created.length}/${count}). Puede que no queden combinaciones únicas.`
-    );
-  }
-  return created;
-}
-
 export async function POST(_req: Request, context: any) {
   const id = String(context?.params?.id || "");
 
-  // 1) Validar admin por sesión
-  const cookieStore = cookies(); // ✅ síncrono en route handlers
+  // 1) Validar admin por sesión (usar cookies awaited)
+  const cookieStore = await cookies();
   const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
   const {
     data: { user },
@@ -88,7 +31,7 @@ export async function POST(_req: Request, context: any) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-  // 3) Leer orden + rifa
+  // 3) Leer orden + rifa básica
   const { data: order, error: readErr } = await admin
     .from("orders")
     .select("id, raffle_id, quantity, status, boletos, correo, name")
@@ -116,7 +59,7 @@ export async function POST(_req: Request, context: any) {
     });
   }
 
-  // 4) Idempotencia: ya confirmada con boletos
+  // 4) Idempotencia: ya confirmada con boletos → devolverlos
   if (order.status === "confirmed" && order.boletos) {
     let tickets: string[] = [];
     try {
@@ -133,35 +76,47 @@ export async function POST(_req: Request, context: any) {
         headers: { "Content-Type": "application/json" },
       });
     }
-    // si está confirmada pero sin boletos (caso raro), seguimos y los generamos
+    // si está confirmada pero sin boletos (caso raro), continuamos para reestablecerlos
   }
 
-  // 5) Generar boletos únicos e insertar en tickets
-  const nums = await generateUniqueTicketsForOrder(admin, order.raffle_id, qty);
-  const formatted = nums.map(pad4);
-  const boletosPayload = JSON.stringify(formatted);
+  // 5) Confirmar TODO en una sola transacción vía RPC
+  const { data: rpc, error: rpcErr } = await admin.rpc("confirm_order_tx", {
+    p_order_id: id,
+  });
 
-  // 6) Guardar en orders
-  const { error: updErr } = await admin
-    .from("orders")
-    .update({ boletos: boletosPayload, status: "confirmed" })
-    .eq("id", id);
-
-  if (updErr) {
-    return new Response(JSON.stringify({ error: updErr.message }), {
+  if (rpcErr) {
+    return new Response(JSON.stringify({ error: rpcErr.message }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // 7) Traer info de la rifa para el email (se usa en el template)
+  // El RPC devuelve { ok: true, confirmed: true, tickets: [...] }
+  const formatted: string[] = Array.isArray((rpc as any)?.tickets)
+    ? (rpc as any).tickets
+    : (() => {
+        try {
+          return JSON.parse((rpc as any)?.tickets ?? "[]");
+        } catch {
+          return [];
+        }
+      })();
+
+  if (!formatted.length) {
+    return new Response(JSON.stringify({ error: "La transacción no devolvió boletos" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // 6) Traer info de la rifa para el email (se usa en el template)
   const { data: raffle } = await admin
     .from("raffles")
     .select("title, slug, price, banner_url")
     .eq("id", order.raffle_id)
     .maybeSingle();
 
-  // 8) Enviar correo (si hay destinatario)
+  // 7) Enviar correo (si hay destinatario)
   try {
     const to = order.correo || null;
     console.log("✉️ [ADMIN CONFIRM] preparando email…", {

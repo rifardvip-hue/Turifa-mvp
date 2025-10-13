@@ -8,12 +8,16 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const admin = createClient(url, key);
 
-export async function GET(_req: Request, context: any) {
-  const id = String(context?.params?.id || "");
+type ParamsPromise = Promise<{ id: string }>;
+
+export async function GET(_req: Request, { params }: { params: ParamsPromise }) {
+  const { id } = await params; // <-- importante: await params
   try {
     const { data, error, status, statusText } = await admin
       .from("raffles")
-      .select("id, slug, title, description, price, total_tickets, bank_instructions, media, created_at")
+      .select(
+        "id, slug, title, description, price, total_tickets, bank_instructions, media, created_at"
+      )
       .eq("id", id)
       .maybeSingle();
 
@@ -31,6 +35,7 @@ export async function GET(_req: Request, context: any) {
     }
 
     const banner_url = (data as any)?.media?.banner ?? null;
+
     return NextResponse.json({
       ok: true,
       raffle: {

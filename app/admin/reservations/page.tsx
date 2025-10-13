@@ -13,7 +13,12 @@ type Row = {
   voucher_url?: string | null;
   ticket_blocks: any;
   created_at: string;
+  // opcionales si tu API ya los manda
+  quantity?: number;
+  price?: number;
 };
+
+type RaffleOption = { id: string; slug: string; title: string };
 
 function toDigitsList(tb: any): string[] {
   if (!tb) return [];
@@ -41,21 +46,73 @@ export default function AdminReservationsPage() {
   const [selected, setSelected] = useState<Row | null>(null);
   const [voucher, setVoucher] = useState<string | null>(null);
 
+  // filtro por rifa
+  const [raffles, setRaffles] = useState<RaffleOption[]>([]);
+  const [raffleSlug, setRaffleSlug] = useState<string>("");
+
   // 👇 ver boletos
   const [ticketsOpen, setTicketsOpen] = useState(false);
   const [tickets, setTickets] = useState<string[]>([]);
   const [loadingTickets, setLoadingTickets] = useState(false);
 
   const totalRD$ = useMemo(
-    () => rows.reduce((acc, r) => acc + Number(r.amount_cents || 0) / 100, 0),
+    () =>
+      rows.reduce((acc, r) => acc + Number(r.amount_cents || 0) / 100, 0),
     [rows]
   );
 
+  // ---------- cargar rifas para el selector ----------
+  async function loadRaffles() {
+    try {
+      const res = await fetch("/api/admin/raffles", { cache: "no-store" });
+      const j = await res.json().catch(() => null);
+      if (res.ok && j?.ok && Array.isArray(j.items)) {
+        const opts: RaffleOption[] = j.items.map((r: any) => ({
+          id: r.id,
+          slug: r.slug,
+          title: r.title ?? r.slug,
+        }));
+        setRaffles(opts);
+        // si ya tienes una sola activa, podrías preseleccionarla aquí
+      }
+    } catch {
+      /* no-op */
+    }
+  }
+
+  // ---------- util: sanitizar teléfono y abrir WhatsApp ----------
+  function openWhatsAppMessage(order: Row, ticketList: string[]) {
+    // mensaje similar al correo
+    const lines: string[] = [];
+    lines.push(`Hola ${order.customer_name || ""} 👋`);
+    lines.push(`Tu pago fue confirmado ✅`);
+    lines.push(`Rifa: ${order.raffle_slug}`);
+    const amount = (Number(order.amount_cents || 0) / 100).toFixed(2);
+    lines.push(`Monto: RD$ ${amount}`);
+    if (ticketList.length) {
+      lines.push(`Boletos: ${ticketList.join(", ")}`);
+    }
+    lines.push(`¡Gracias por participar y mucha suerte! 🍀`);
+
+    const msg = lines.join("\n");
+    // sanitizar teléfono (solo dígitos)
+    const raw = (order.customer_phone || "").replace(/\D+/g, "");
+    // si son 10 dígitos (DR), anteponer 1
+    const phone =
+      raw.length === 10 ? `1${raw}` : raw.length >= 11 ? raw : "";
+
+    const base = phone ? `https://wa.me/${phone}` : `https://wa.me/`;
+    const url = `${base}?text=${encodeURIComponent(msg)}`;
+    window.open(url, "_blank");
+  }
+
+  // ---------- DATA ----------
   async function fetchData(p = 1) {
     setLoading(true);
     const url = new URL("/api/admin/reservations", window.location.origin);
     if (q) url.searchParams.set("q", q);
     if (status) url.searchParams.set("status", status);
+    if (raffleSlug) url.searchParams.set("raffle_slug", raffleSlug); // servidor
     url.searchParams.set("page", String(p));
     url.searchParams.set("pageSize", "20");
 
@@ -64,35 +121,53 @@ export default function AdminReservationsPage() {
       window.location.href = "/login";
       return;
     }
-    const json = await res.json();
-    setRows(json.rows || []);
+    const json = await res.json().catch(() => ({} as any));
+    let nextRows: Row[] = json?.rows || [];
+
+    // respaldo: si el endpoint aún NO filtra por raffle_slug, filtramos aquí
+    if (raffleSlug) {
+      nextRows = nextRows.filter((r) => r.raffle_slug === raffleSlug);
+    }
+
+    setRows(nextRows);
     setPage(p);
     setLoading(false);
   }
 
   useEffect(() => {
-    fetchData(1);
-  }, [status]);
+    loadRaffles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function confirm(id: string) {
+  useEffect(() => {
+    fetchData(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, raffleSlug]);
+
+  // ---------- acciones ----------
+  async function confirm(order: Row) {
     const prev = [...rows];
-    setRows((r) => r.map((x) => (x.id === id ? { ...x, status: "confirmed" } : x)));
+    setRows((r) =>
+      r.map((x) =>
+        x.id === order.id ? { ...x, status: "confirmed" } : x
+      )
+    );
 
     try {
       // 1) tu endpoint actual (si existe)
-      let res = await fetch(`/api/admin/orders/${id}/confirm`, {
+      let res = await fetch(`/api/admin/orders/${order.id}/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
       });
 
-      // 2) si no existe o falla, fallback al endpoint idempotente
+      // 2) si no existe o falla, fallback idempotente
       if (!res.ok) {
         res = await fetch(`/api/orders/confirm`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
-          body: JSON.stringify({ order_id: id }),
+          body: JSON.stringify({ order_id: order.id }),
         });
       }
 
@@ -103,16 +178,21 @@ export default function AdminReservationsPage() {
         return;
       }
 
-      // opcional: leer tickets devueltos si el fallback respondió con ellos
+      // leer tickets si vinieron para incluirlos en WhatsApp
+      let confirmedTickets: string[] = [];
       try {
         const json = await res.json();
         if (Array.isArray(json?.tickets) && json.tickets.length) {
-          setTickets(json.tickets.map(String));
+          confirmedTickets = json.tickets.map(String);
+          setTickets(confirmedTickets);
           setTicketsOpen(true);
         }
       } catch {
-        /* no-op */
+        /* puede que el endpoint no devuelva JSON */
       }
+
+      // abrir WhatsApp con mensaje
+      openWhatsAppMessage(order, confirmedTickets);
 
       await fetchData(page);
       setSelected(null);
@@ -150,7 +230,7 @@ export default function AdminReservationsPage() {
     }
   }
 
-  // ver boletos (usa ticket_blocks si ya viene; si no, usa endpoint idempotente)
+  // ver boletos (usa ticket_blocks si ya viene; si no, endpoint idempotente)
   async function viewTickets(order: Row) {
     setLoadingTickets(true);
     try {
@@ -189,7 +269,9 @@ export default function AdminReservationsPage() {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold">🎫 Administrar Reservas</h1>
-              <p className="text-blue-100 text-sm mt-1">Gestiona todas las reservas de rifas</p>
+              <p className="text-blue-100 text-sm mt-1">
+                Gestiona todas las reservas de rifas
+              </p>
             </div>
             <div className="flex items-center gap-3">
               <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 sm:px-6 py-3 border border-white/30">
@@ -213,22 +295,41 @@ export default function AdminReservationsPage() {
         {/* Filtros */}
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 sm:p-6">
           <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1">
+            {/* Selector de Rifa */}
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch">
+              <div className="sm:w-[420px]">
+                <label className="block text-xs font-semibold text-gray-500 mb-1">
+                  Filtrar por Rifa:
+                </label>
+                <select
+                  value={raffleSlug}
+                  onChange={(e) => setRaffleSlug(e.target.value)}
+                  className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 focus:border-purple-500 focus:outline-none transition-colors bg-white"
+                >
+                  <option value="">Todas las rifas</option>
+                  {raffles.map((r) => (
+                    <option key={r.id} value={r.slug}>
+                      {r.title?.toUpperCase?.() || r.slug}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex-1 flex gap-3">
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="🔍 Buscar por nombre, email o teléfono..."
-                  className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:border-purple-500 focus:outline-none transition-colors"
+                  className="flex-1 border-2 border-gray-200 rounded-xl px-4 py-3 focus:border-purple-500 focus:outline-none transition-colors"
                   onKeyDown={(e) => e.key === "Enter" && fetchData(1)}
                 />
+                <button
+                  onClick={() => fetchData(1)}
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transform hover:scale-105 transition-all"
+                >
+                  Buscar
+                </button>
               </div>
-              <button
-                onClick={() => fetchData(1)}
-                className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transform hover:scale-105 transition-all"
-              >
-                Buscar
-              </button>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -411,7 +512,7 @@ export default function AdminReservationsPage() {
                     <span className="text-2xl">🎫</span>
                     <div className="flex-1">
                       <p className="text-xs text-gray-500 uppercase font-semibold">Cantidad</p>
-                      <p className="text-gray-900 font-medium">{(selected as any).quantity}</p>
+                      <p className="text-gray-900 font-medium">{selected.quantity}</p>
                     </div>
                   </div>
                 )}
@@ -422,7 +523,7 @@ export default function AdminReservationsPage() {
                     <div className="flex-1">
                       <p className="text-xs text-gray-500 uppercase font-semibold">Precio por boleto</p>
                       <p className="text-gray-900 font-medium">
-                        RD${Number((selected as any).price).toFixed(2)}
+                        RD${Number(selected.price ?? 0).toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -443,7 +544,9 @@ export default function AdminReservationsPage() {
                 <div className="bg-emerald-50 rounded-2xl p-4">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-2xl">🎲</span>
-                    <p className="text-xs text-gray-500 uppercase font-semibold">Números Seleccionados</p>
+                    <p className="text-xs text-gray-500 uppercase font-semibold">
+                      Números Seleccionados
+                    </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {toDigitsList(selected.ticket_blocks).map((d) => (
@@ -473,7 +576,7 @@ export default function AdminReservationsPage() {
             <div className="bg-gray-50 p-6 rounded-b-3xl flex flex-col sm:flex-row gap-3">
               <button
                 className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white py-3 px-6 rounded-xl font-semibold hover:shadow-lg transform hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
-                onClick={() => confirm(selected.id)}
+                onClick={() => confirm(selected)}
                 disabled={selected.status === "confirmed"}
               >
                 <span className="text-xl">✓</span>
@@ -571,7 +674,9 @@ export default function AdminReservationsPage() {
 
               <div className="mt-5 flex justify-end gap-2">
                 <button
-                  onClick={() => navigator.clipboard.writeText(tickets.join(", "))}
+                  onClick={() =>
+                    navigator.clipboard.writeText(tickets.join(", "))
+                  }
                   className="px-3 py-2 rounded-lg bg-gray-200 hover:bg-gray-300"
                 >
                   Copiar

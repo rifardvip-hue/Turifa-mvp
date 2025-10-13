@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import BannerUploader from "../_utils/BannerUploader";
 
-
 type GalleryItem = { id: string; type: "image" | "video"; url: string; order: number };
 type PaymentMethod = {
   id: string;
@@ -75,8 +74,12 @@ export default function RaffleMediaEditor() {
     if (!r.media) r.media = { banner: r.banner_url ?? null, gallery: [], payments: [] };
     if (!r.media.gallery) r.media.gallery = [];
     if (!r.media.payments) r.media.payments = [];
-    r.media.gallery = [...r.media.gallery].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((m, i) => ({ ...m, order: i }));
-    r.media.payments = [...r.media.payments].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((p, i) => ({ ...p, order: i }));
+    r.media.gallery = [...r.media.gallery]
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((m, i) => ({ ...m, order: i }));
+    r.media.payments = [...r.media.payments]
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((p, i) => ({ ...p, order: i }));
     setRaffle(r);
   }
 
@@ -87,7 +90,9 @@ export default function RaffleMediaEditor() {
       const res = await fetch(`/api/admin/bank-institutions?raffle_id=${id}`, { cache: "no-store" });
       const j = await res.json();
       if (j?.ok && Array.isArray(j.items)) {
-        const items = [...j.items].sort((a: BankRow, b: BankRow) => (a.order ?? 0) - (b.order ?? 0));
+        const items = [...j.items].sort(
+          (a: BankRow, b: BankRow) => (a.order ?? 0) - (b.order ?? 0)
+        );
         setBanks(items);
       } else {
         setBanks([]);
@@ -112,37 +117,42 @@ export default function RaffleMediaEditor() {
     setBusy(true);
     const fd = new FormData();
     for (const f of Array.from(files)) fd.append("files", f);
-const res = await fetch(`/api/admin/raffles/${raffle.id}/media`, { method: "POST", body: fd });
+    const res = await fetch(`/api/admin/raffles/${raffle.id}/media`, { method: "POST", body: fd });
 
-// --- parseo robusto ---
-const ct = res.headers.get("content-type") || "";
-let j: any = null;
+    // --- parseo robusto ---
+    const ct = res.headers.get("content-type") || "";
+    let j: any = null;
 
-if (res.status === 204) {
-  j = { ok: true, gallery: raffle.media.gallery }; // servidor no envió cuerpo
-} else if (ct.includes("application/json")) {
-  j = await res.json().catch(() => null);
-} else {
-  const txt = await res.text().catch(() => "");
-  j = txt ? { ok: false, error: txt } : null;
-}
+    if (res.status === 204) {
+      j = { ok: true, gallery: raffle.media.gallery }; // servidor no envió cuerpo
+    } else if (ct.includes("application/json")) {
+      j = await res.json().catch(() => null);
+    } else {
+      const txt = await res.text().catch(() => "");
+      j = txt ? { ok: false, error: txt } : null;
+    }
 
-setBusy(false);
-if (!res.ok || !j?.ok) {
-  return alert(j?.error || `Error HTTP ${res.status}`);
-}
+    setBusy(false);
+    if (!res.ok || !j?.ok) {
+      return alert(j?.error || `Error HTTP ${res.status}`);
+    }
 
-setRaffle(prev =>
-  prev ? { ...prev, media: { ...prev.media, gallery: j.gallery ?? prev.media.gallery } } : prev
-);
-e.target.value = "";
-}
+    setRaffle(prev =>
+      prev
+        ? { ...prev, media: { ...prev.media, gallery: j.gallery ?? prev.media.gallery } }
+        : prev
+    );
+    e.target.value = "";
+  }
 
   function galleryRemove(id: string) {
     if (!raffle) return;
-    const gallery = raffle.media.gallery.filter(m => m.id !== id).map((m, i) => ({ ...m, order: i }));
+    const gallery = raffle.media.gallery
+      .filter(m => m.id !== id)
+      .map((m, i) => ({ ...m, order: i }));
     setRaffle({ ...raffle, media: { ...raffle.media, gallery } });
   }
+
   function galleryMove(index: number, dir: "up" | "down") {
     if (!raffle) return;
     const g = [...raffle.media.gallery];
@@ -160,43 +170,56 @@ e.target.value = "";
     const fd = new FormData();
     fd.append("file", file);
     setBusy(true);
-  const res = await fetch(`/api/admin/raffles/${raffle.id}/banner`, { method: "POST", body: fd });
+    const res = await fetch(`/api/admin/raffles/${raffle.id}/banner`, { method: "POST", body: fd });
 
-// --- parseo robusto ---
-const ct = res.headers.get("content-type") || "";
-let j: any = null;
-if (res.status === 204) {
-  j = { ok: true, banner_url: raffle.banner_url ?? null };
-} else if (ct.includes("application/json")) {
-  j = await res.json().catch(() => null);
-} else {
-  const txt = await res.text().catch(() => "");
-  j = txt ? { ok: false, error: txt } : null;
-}
+    // --- parseo robusto ---
+    const ct = res.headers.get("content-type") || "";
+    let j: any = null;
+    if (res.status === 204) {
+      j = { ok: true, banner_url: raffle.banner_url ?? null };
+    } else if (ct.includes("application/json")) {
+      j = await res.json().catch(() => null);
+    } else {
+      const txt = await res.text().catch(() => "");
+      j = txt ? { ok: false, error: txt } : null;
+    }
 
-setBusy(false);
-if (!res.ok || !j?.ok) return alert(j?.error || `Error HTTP ${res.status}`);
+    setBusy(false);
+    if (!res.ok || !j?.ok) return alert(j?.error || `Error HTTP ${res.status}`);
 
-const newUrl = j.banner_url ?? raffle.banner_url ?? null;
-setRaffle(prev => prev ? ({ ...prev, banner_url: newUrl, media: { ...prev.media, banner: newUrl } }) : prev);
-e.target.value = "";
-}
-
+    const newUrl = j.banner_url ?? raffle.banner_url ?? null;
+    setRaffle(prev =>
+      prev ? { ...prev, banner_url: newUrl, media: { ...prev.media, banner: newUrl } } : prev
+    );
+    e.target.value = "";
+  }
 
   // ------- PAYMENTS (draft nuevos) -------
   function paymentsAdd() {
     if (!raffle) return;
     const payments = [
       ...((raffle.media.payments ?? []).map((p, i) => ({ ...p, order: i }))),
-      { id: uid(), name: "", type: "transfer" as const, account: "", holder: "", logo_url: null, order: (raffle.media.payments?.length ?? 0) },
+      {
+        id: uid(),
+        name: "",
+        type: "transfer" as const,
+        account: "",
+        holder: "",
+        logo_url: null,
+        order: raffle.media.payments?.length ?? 0,
+      },
     ];
     setRaffle({ ...raffle, media: { ...raffle.media, payments } });
   }
+
   function paymentsRemove(idx: number) {
     if (!raffle) return;
-    const payments = (raffle.media.payments ?? []).filter((_, i) => i !== idx).map((p, i) => ({ ...p, order: i }));
+    const payments = (raffle.media.payments ?? [])
+      .filter((_, i) => i !== idx)
+      .map((p, i) => ({ ...p, order: i }));
     setRaffle({ ...raffle, media: { ...raffle.media, payments } });
   }
+
   function paymentsMove(index: number, dir: "up" | "down") {
     if (!raffle) return;
     const list = [...(raffle.media.payments ?? [])];
@@ -206,110 +229,104 @@ e.target.value = "";
     const payments = list.map((p, i) => ({ ...p, order: i }));
     setRaffle({ ...raffle, media: { ...raffle.media, payments } });
   }
+
   function paymentsEdit<K extends keyof PaymentMethod>(idx: number, key: K, value: PaymentMethod[K]) {
     if (!raffle) return;
     const list = [...(raffle.media.payments ?? [])];
     list[idx] = { ...list[idx], [key]: value };
     setRaffle({ ...raffle, media: { ...raffle.media, payments: list } });
   }
+
+  // ✅ CORREGIDO: abrir selector y subir logo
   async function paymentsUploadLogo(idx: number) {
     if (!raffle) return;
+
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
+
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
+
       setBusy(true);
       const fd = new FormData();
       fd.append("files", file);
-    const res = await fetch(`/api/admin/raffles/${raffle.id}/media`, { method: "POST", body: fd });
 
-// --- parseo robusto ---
-const ct = res.headers.get("content-type") || "";
-let j: any = null;
-if (res.status === 204) {
-  j = { ok: false, error: "El servidor no devolvió archivos" };
-} else if (ct.includes("application/json")) {
-  j = await res.json().catch(() => null);
-} else {
-  const txt = await res.text().catch(() => "");
-  j = { ok: false, error: txt || "Respuesta no-JSON" };
-}
-
-setBusy(false);
-if (!j?.ok || !Array.isArray(j.gallery) || j.gallery.length === 0) {
-  return alert(j?.error || "No se pudo subir el logo");
-}
-
-const last = j.gallery[j.gallery.length - 1];
-paymentsEdit(idx, "logo_url", last.url);
-    };
-}
-
-async function saveRaffle() {
-  if (!raffle) return;
-  setBusy(true);
-
-  try {
-    console.log('🎯 ID de la rifa:', raffle.id);
-    console.log('🎯 Precio ANTES de enviar:', raffle.price);
-    console.log('🎯 Estado completo de raffle:', raffle);
-    
-    const payload = {
-      title: raffle.title,
-      description: raffle.description,
-      bank_instructions: raffle.bank_instructions ?? "",
-      price: Number(raffle.price),
-      total_tickets: Number(raffle.total_tickets),
-      banner_url: raffle.banner_url ?? raffle.media?.banner ?? null,
-      media: {
-        banner: raffle.banner_url ?? raffle.media?.banner ?? null,
-        gallery: raffle.media?.gallery || [],
-        payments: raffle.media?.payments || []
-      }
-    };
-
-    console.log('📤 PAYLOAD COMPLETO:', JSON.stringify(payload, null, 2));
-    
-    const res = await fetch(`/api/admin/raffles/${raffle.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    console.log('📥 Status de respuesta:', res.status);
-
-    // ... resto del código
-  
-    // 👇 REVALIDAR LA PÁGINA PÚBLICA
-    try {
-      console.log('🔄 Revalidando cache de la página pública...');
-      const revalidateRes = await fetch(`/api/revalidate?path=/rifa/${raffle.slug}`, {
-        method: 'POST'
+      const res = await fetch(`/api/admin/raffles/${raffle.id}/media`, {
+        method: "POST",
+        body: fd,
       });
-      
-      if (revalidateRes.ok) {
-        console.log('✅ Cache revalidado exitosamente');
+
+      // --- parseo robusto ---
+      const ct = res.headers.get("content-type") || "";
+      let j: any = null;
+      if (ct.includes("application/json")) {
+        j = await res.json().catch(() => null);
       } else {
-        console.warn('⚠️ No se pudo revalidar cache (endpoint no existe aún)');
+        const txt = await res.text().catch(() => "");
+        j = { ok: false, error: txt || "Respuesta no-JSON" };
       }
-    } catch (e) {
-      console.warn('⚠️ Error revalidando:', e);
-    }
-    
-    setBusy(false);
-    alert("✅ Rifa actualizada correctamente\n\n💡 Recarga la página pública (Cmd+Shift+R) para ver los cambios");
 
-    await load();
-    await loadBanks();
+      setBusy(false);
 
-  } catch (error: any) {
-    console.error('❌ Error crítico:', error);
-    setBusy(false);
-    alert(`❌ Error: ${error?.message || 'Error desconocido'}`);
+      if (!res.ok || !j?.ok || !Array.isArray(j.gallery) || j.gallery.length === 0) {
+        return alert(j?.error || `Error HTTP ${res.status}`);
+      }
+
+      const last = j.gallery[j.gallery.length - 1];
+      paymentsEdit(idx, "logo_url", last.url);
+    };
+
+    // 👇 esto faltaba
+    input.click();
   }
-}
+
+  async function saveRaffle() {
+    if (!raffle) return;
+    setBusy(true);
+
+    try {
+      const payload = {
+        title: raffle.title,
+        description: raffle.description,
+        bank_instructions: raffle.bank_instructions ?? "",
+        price: Number(raffle.price),
+        total_tickets: Number(raffle.total_tickets),
+        banner_url: raffle.banner_url ?? raffle.media?.banner ?? null,
+        media: {
+          banner: raffle.banner_url ?? raffle.media?.banner ?? null,
+          gallery: raffle.media?.gallery || [],
+          payments: raffle.media?.payments || [],
+        },
+      };
+
+      const res = await fetch(`/api/admin/raffles/${raffle.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      // Revalidación “best effort”
+      try {
+        await fetch(`/api/revalidate?path=/rifa/${raffle.slug}`, { method: "POST" });
+      } catch {}
+
+      setBusy(false);
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        alert(t || "Error al guardar");
+        return;
+      }
+
+      alert("✅ Rifa actualizada correctamente\n\n💡 Refresca la página pública para ver cambios");
+      await load();
+      await loadBanks();
+    } catch (error: any) {
+      setBusy(false);
+      alert(`❌ Error: ${error?.message || "Error desconocido"}`);
+    }
+  }
 
   // ------- EDITAR/ELIMINAR (DB) -------
   function startEdit(b: BankRow) {
@@ -349,7 +366,9 @@ async function saveRaffle() {
   async function deleteBank(bankId: string) {
     if (!raffle?.id) return;
     if (!confirm("¿Eliminar esta institución?")) return;
-    const res = await fetch(`/api/admin/raffles/${raffle.id}/media?bank_id=${bankId}`, { method: "DELETE" });
+    const res = await fetch(`/api/admin/raffles/${raffle.id}/media?bank_id=${bankId}`, {
+      method: "DELETE",
+    });
     const j = await res.json();
     if (!res.ok || !j?.ok) {
       alert(j?.error || "No se pudo eliminar la institución");
@@ -369,7 +388,7 @@ async function saveRaffle() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => router.push("/admin/reservations")}
-                className="bg-white/10 hover:bg白/20 text-white px-3 py-2 rounded-lg font-semibold border border-white/30 transition-all"
+                className="bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-lg font-semibold border border-white/30 transition-all"
                 title="Volver al módulo de ventas"
               >
                 ← Volver a Ventas
@@ -379,8 +398,6 @@ async function saveRaffle() {
                 <p className="text-purple-100 mt-1">/{raffle.slug}</p>
               </div>
             </div>
-
-            
           </div>
         </div>
 
@@ -407,7 +424,9 @@ async function saveRaffle() {
             <div>
               <label className="block text-sm font-semibold text-gray-400 mb-2">Precio</label>
               <input
-                type="number" min={0} step="0.01"
+                type="number"
+                min={0}
+                step="0.01"
                 value={raffle.price}
                 onChange={(e) => setRaffle({ ...raffle, price: Number(e.target.value || 0) })}
                 className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-xl text-white"
@@ -416,7 +435,8 @@ async function saveRaffle() {
             <div>
               <label className="block text-sm font-semibold text-gray-400 mb-2">Boletos totales</label>
               <input
-                type="number" min={0}
+                type="number"
+                min={0}
                 value={raffle.total_tickets}
                 onChange={(e) => setRaffle({ ...raffle, total_tickets: Number(e.target.value || 0) })}
                 className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-xl text-white"
@@ -424,7 +444,9 @@ async function saveRaffle() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-semibold text-gray-400 mb-2">Instrucciones bancarias (texto libre)</label>
+            <label className="block text-sm font-semibold text-gray-400 mb-2">
+              Instrucciones bancarias (texto libre)
+            </label>
             <textarea
               value={raffle.bank_instructions ?? ""}
               onChange={(e) => setRaffle({ ...raffle, bank_instructions: e.target.value })}
@@ -432,7 +454,9 @@ async function saveRaffle() {
               className="w-full px-4 py-3 bg-black/50 border border-gray-700 rounded-xl text-white"
               placeholder={`Banco: ...\nCuenta: ...\nNombre: ...`}
             />
-            <p className="text-xs text-gray-500 mt-1">Opcional. Para mejores opciones usa el editor de instituciones de abajo.</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Opcional. Para mejores opciones usa el editor de instituciones de abajo.
+            </p>
           </div>
         </div>
 
@@ -560,11 +584,14 @@ async function saveRaffle() {
                   <div className="flex items-start gap-4">
                     <div className="w-24">
                       <div className="w-24 h-24 bg-gray-800 rounded-lg flex items-center justify-center overflow-hidden border border-gray-700">
-                        {p.logo_url
-                          ? <img src={p.logo_url} className="w-full h-full object-contain" alt="logo" />
-                          : <span className="text-gray-500 text-sm">Sin logo</span>}
+                        {p.logo_url ? (
+                          <img src={p.logo_url} className="w-full h-full object-contain" alt="logo" />
+                        ) : (
+                          <span className="text-gray-500 text-sm">Sin logo</span>
+                        )}
                       </div>
                       <button
+                        type="button"
                         onClick={() => paymentsUploadLogo(i)}
                         className="mt-2 w-full bg-gray-700 hover:bg-gray-600 text-white text-sm py-1.5 rounded-lg"
                       >
@@ -625,18 +652,24 @@ async function saveRaffle() {
                         disabled={i === 0}
                         className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-white rounded-lg disabled:opacity-30"
                         title="Subir"
-                      >↑</button>
+                      >
+                        ↑
+                      </button>
                       <button
                         onClick={() => paymentsMove(i, "down")}
                         disabled={i === (raffle.media.payments?.length ?? 1) - 1}
                         className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-white rounded-lg disabled:opacity-30"
                         title="Bajar"
-                      >↓</button>
+                      >
+                        ↓
+                      </button>
                       <button
                         onClick={() => paymentsRemove(i)}
                         className="w-10 h-10 bg-red-600 hover:bg-red-700 text-white rounded-lg"
                         title="Eliminar"
-                      >✕</button>
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -676,42 +709,61 @@ async function saveRaffle() {
               {raffle.media.gallery
                 .sort((a, b) => a.order - b.order)
                 .map((m, i) => (
-                <div key={m.id} className="bg-black/30 rounded-xl p-4 flex items-center gap-4 border border-gray-700">
-                  <div className="flex-shrink-0">
-                    {m.type === "video"
-                      ? <video src={m.url} className="w-24 h-24 object-cover rounded-lg" muted />
-                      : <img src={m.url} className="w-24 h-24 object-cover rounded-lg" alt="" />}
+                  <div
+                    key={m.id}
+                    className="bg-black/30 rounded-xl p-4 flex items-center gap-4 border border-gray-700"
+                  >
+                    <div className="flex-shrink-0">
+                      {m.type === "video" ? (
+                        <video src={m.url} className="w-24 h-24 object-cover rounded-lg" muted />
+                      ) : (
+                        <img src={m.url} className="w-24 h-24 object-cover rounded-lg" alt="" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-white">
+                        {m.type === "video" ? "🎥 Video" : "🖼️ Imagen"} · #{i + 1}
+                      </div>
+                      <div className="text-gray-400 text-sm truncate">{m.url}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => galleryMove(i, "up")}
+                        disabled={i === 0}
+                        className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-white rounded-lg disabled:opacity-30"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        onClick={() => galleryMove(i, "down")}
+                        disabled={i === raffle.media.gallery.length - 1}
+                        className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-white rounded-lg disabled:opacity-30"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        onClick={() => galleryRemove(m.id)}
+                        className="w-10 h-10 bg-red-600 hover:bg-red-700 text-white rounded-lg"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-white">{m.type === "video" ? "🎥 Video" : "🖼️ Imagen"} · #{i + 1}</div>
-                    <div className="text-gray-400 text-sm truncate">{m.url}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => galleryMove(i, "up")} disabled={i === 0}
-                      className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-white rounded-lg disabled:opacity-30">↑</button>
-                    <button onClick={() => galleryMove(i, "down")} disabled={i === raffle.media.gallery.length - 1}
-                      className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-white rounded-lg disabled:opacity-30">↓</button>
-                    <button onClick={() => galleryRemove(m.id)}
-                      className="w-10 h-10 bg-red-600 hover:bg-red-700 text-white rounded-lg">✕</button>
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </div>
-        {/* --- BLOQUE NUEVO: Subir Banner --- */}
-<BannerUploader
-  raffleId={raffle.id}
-  initialBanner={raffle.media?.banner || raffle.banner_url || null}
-  onChange={(newUrl) => {
-    setRaffle((prev: any) =>
-      prev
-        ? { ...prev, media: { ...(prev.media || {}), banner: newUrl }, banner_url: newUrl }
-        : prev
-    );
-  }}
-/>
 
+        {/* --- BLOQUE NUEVO: Subir Banner --- */}
+        <BannerUploader
+          raffleId={raffle.id}
+          initialBanner={raffle.media?.banner || raffle.banner_url || null}
+          onChange={(newUrl) => {
+            setRaffle((prev: any) =>
+              prev ? { ...prev, media: { ...(prev.media || {}), banner: newUrl }, banner_url: newUrl } : prev
+            );
+          }}
+        />
 
         {/* Preview + Guardar */}
         <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 shadow-xl border border-gray-700">
@@ -724,19 +776,27 @@ async function saveRaffle() {
               <div className="font-bold">{raffle.title}</div>
               <div className="text-sm text-orange-400">RD${(raffle.price ?? 0).toFixed(2)}</div>
             </div>
-            {raffle.banner_url
-              ? <img src={raffle.banner_url} className="w-full h-48 object-cover" alt="Banner" />
-              : <div className="h-48 bg-gray-800 flex items-center justify-center text-gray-500">Sin banner</div>}
+            {raffle.banner_url ? (
+              <img src={raffle.banner_url} className="w-full h-48 object-cover" alt="Banner" />
+            ) : (
+              <div className="h-48 bg-gray-800 flex items-center justify-center text-gray-500">Sin banner</div>
+            )}
           </div>
         </div>
 
         <div className="flex gap-4">
-          <button onClick={saveRaffle}
-            className="flex-1 bg-gradient-to-r from-green-600 to-green-700 text-white py-4 rounded-xl font-bold text-lg">
+          <button
+            onClick={saveRaffle}
+            className="flex-1 bg-gradient-to-r from-green-600 to-green-700 text-white py-4 rounded-xl font-bold text-lg"
+          >
             💾 Guardar cambios
           </button>
-          <button onClick={() => router.push("/admin/rifas")}
-            className="px-6 bg-gray-700 text-white py-4 rounded-xl font-bold">Cancelar</button>
+          <button
+            onClick={() => router.push("/admin/rifas")}
+            className="px-6 bg-gray-700 text-white py-4 rounded-xl font-bold"
+          >
+            Cancelar
+          </button>
         </div>
       </div>
     </div>

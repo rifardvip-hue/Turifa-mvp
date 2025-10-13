@@ -1,4 +1,4 @@
-// ✅ app/api/admin/raffles/[id]/media/route.ts
+// app/api/admin/raffles/[id]/media/route.ts
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -6,16 +6,19 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/* ===================== GET: Cargar media ===================== */
-export async function GET(_req: Request, context: any) {
-  try {
-    const id = String(context?.params?.id || "");
-    if (!id) {
-      return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
-    }
+// Helper para evitar el warning de cookies()
+function getSupabaseFromRoute() {
+  const cookieStore = cookies();                 // ← capturamos una sola vez
+  return createRouteHandlerClient({ cookies: () => cookieStore });
+}
 
-    // cookies() es síncrono en route handlers
-    const supabase = createRouteHandlerClient({ cookies: () => cookies() });
+/* ===================== GET: Media (banner + galería) ===================== */
+export async function GET(_req: Request, ctx: { params: { id: string } }) {
+  try {
+    const id = String(ctx?.params?.id || "");
+    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+
+    const supabase = getSupabaseFromRoute();
 
     const { data: raffle, error: raffleError } = await supabase
       .from("raffles")
@@ -23,14 +26,7 @@ export async function GET(_req: Request, context: any) {
         `
         *,
         bank_institutions (
-          id,
-          method,
-          name,
-          account,
-          holder,
-          logo_url,
-          extra,
-          order
+          id, method, name, account, holder, logo_url, extra, "order"
         )
       `
       )
@@ -38,10 +34,7 @@ export async function GET(_req: Request, context: any) {
       .maybeSingle();
 
     if (raffleError || !raffle) {
-      return NextResponse.json(
-        { ok: false, error: "Rifa no encontrada" },
-        { status: 404 }
-      );
+      return NextResponse.json({ ok: false, error: "Rifa no encontrada" }, { status: 404 });
     }
 
     const { data: mediaItems } = await supabase
@@ -50,11 +43,11 @@ export async function GET(_req: Request, context: any) {
       .eq("raffle_id", id)
       .order("order", { ascending: true });
 
-    const gallery = (mediaItems || []).map((item) => ({
-      id: item.id,
-      type: item.type as "image" | "video",
-      url: item.url,
-      order: item.order ?? 0,
+    const gallery = (mediaItems || []).map((m) => ({
+      id: m.id,
+      type: (m.type as "image" | "video") || "image",
+      url: m.url,
+      order: m.order ?? 0,
     }));
 
     return NextResponse.json({
@@ -62,192 +55,165 @@ export async function GET(_req: Request, context: any) {
       raffle: {
         ...raffle,
         media: {
-          banner: raffle.banner_url,
+          banner: raffle.banner_url ?? raffle.media?.banner ?? null,
           gallery,
-          logos: null,
+          payments: raffle.bank_institutions ?? [],
         },
       },
     });
-  } catch (error: any) {
-    console.error("Error en GET media:", error);
-    return NextResponse.json(
-      { ok: false, error: "Error interno", details: error?.message },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: "Error interno", details: err?.message }, { status: 500 });
   }
 }
 
-/* ===================== POST: Subir archivos ===================== */
-export async function POST(request: Request, context: any) {
+/* ===================== POST: Subir archivos (galería / logos) ===================== */
+export async function POST(request: Request, ctx: { params: { id: string } }) {
   try {
-    const id = String(context?.params?.id || "");
-    if (!id) {
-      return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
-    }
+    const id = String(ctx?.params?.id || "");
+    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
-    const supabase = createRouteHandlerClient({ cookies: () => cookies() });
-
-    console.log("📤 POST /api/admin/raffles/[id]/media - Subiendo archivos");
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
-    }
+    const supabase = getSupabaseFromRoute();
 
     const formData = await request.formData();
-    const files = formData.getAll("files") as File[];
+    // Acepta "file" o "files"
+    const single = (formData.get("file") as File) || null;
+    const many = (formData.getAll("files") as File[]).filter(Boolean);
+    const files: File[] = single ? [single, ...many] : many;
 
-    if (files.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "No se enviaron archivos" },
-        { status: 400 }
-      );
+    if (!files.length) {
+      return NextResponse.json({ ok: false, error: "No se enviaron archivos" }, { status: 400 });
     }
 
-    console.log(`📦 Procesando ${files.length} archivo(s)...`);
+    const uploaded: Array<{ id: string; type: "image" | "video"; url: string; order: number }> = [];
 
-    const uploadedItems: any[] = [];
+    for (const [idx, file] of files.entries()) {
+      const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+      const safe = file.name.replace(/\s+/g, "-").replace(/[^\w.-]/g, "");
+      const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}.${ext}`;
+      const path = `raffles/${id}/${name}`;
 
-    for (const file of files) {
-      try {
-        const fileExt = (file.name.split(".").pop() || "bin").toLowerCase();
-        const base = file.name.replace(/\s+/g, "-").replace(/[^\w.-]/g, "");
-        const fileName = `${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2, 8)}-${base}.${fileExt}`;
-        const filePath = `raffles/${id}/${fileName}`;
-
-        console.log(`⬆️ Subiendo: ${fileName}`);
-
-        const buf = new Uint8Array(await file.arrayBuffer());
-
-        const { data, error } = await supabase.storage
-          .from("raffles")
-          .upload(filePath, buf, {
-            contentType: file.type || "application/octet-stream",
-            upsert: false,
-          });
-
-        if (error) {
-          console.error(`❌ Error subiendo ${fileName}:`, error);
-          continue;
-        }
-
-        console.log(`✅ Archivo subido: ${data?.path}`);
-
-        const pub = supabase.storage.from("raffles").getPublicUrl(filePath);
-        const publicUrl = pub?.data?.publicUrl || "";
-
-        const type = (file.type || "").startsWith("video/") ? "video" : "image";
-
-        uploadedItems.push({
-          id: `media_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-          type,
-          url: publicUrl,
-          order: uploadedItems.length,
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const { error: upErr } = await supabase.storage
+        .from("raffles")
+        .upload(path, buf, {
+          contentType: file.type || "application/octet-stream",
+          upsert: false,
         });
 
-        console.log(`✅ URL pública: ${publicUrl}`);
-      } catch (fileError) {
-        console.error(`❌ Error procesando archivo:`, fileError);
-      }
+      if (upErr) continue;
+
+      const { data: pub } = supabase.storage.from("raffles").getPublicUrl(path);
+      const url = pub?.publicUrl || "";
+
+      uploaded.push({
+        id: `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: (file.type || "").startsWith("video/") ? "video" : "image",
+        url,
+        order: idx,
+      });
     }
 
-    if (uploadedItems.length === 0) {
-      console.error("❌ No se pudo subir ningún archivo");
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No se pudo subir ningún archivo. Verifica los permisos de Storage.",
-        },
-        { status: 500 }
-      );
+    if (!uploaded.length) {
+      return NextResponse.json({ ok: false, error: "No se pudo subir ningún archivo. Revisa permisos del bucket." }, { status: 500 });
     }
 
-    console.log(`✅ Subidos ${uploadedItems.length} archivo(s) exitosamente`);
-
-    return NextResponse.json({
-      ok: true,
-      gallery: uploadedItems,
-    });
-  } catch (error: any) {
-    console.error("❌ Error crítico en POST media:", error);
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Error interno",
-        details: error?.message,
-      },
-      { status: 500 }
-    );
+    // La persistencia final de la galería se hace desde PATCH del otro endpoint;
+    // aquí devolvemos URLs para que el cliente las use (p.ej. logo_url).
+    return NextResponse.json({ ok: true, gallery: uploaded });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: "Error interno", details: err?.message }, { status: 500 });
   }
 }
 
-/* ===================== PATCH: Actualizar galería ===================== */
-export async function PATCH(request: Request, context: any) {
+/* ===================== PATCH: Persistir orden/estado de galería ===================== */
+export async function PATCH(request: Request, ctx: { params: { id: string } }) {
   try {
-    const id = String(context?.params?.id || "");
-    if (!id) {
-      return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
-    }
+    const id = String(ctx?.params?.id || "");
+    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
-    const supabase = createRouteHandlerClient({ cookies: () => cookies() });
+    const supabase = getSupabaseFromRoute();
+    const body = await request.json().catch(() => ({}));
+    const gallery = Array.isArray(body?.gallery) ? body.gallery : null;
 
-    console.log("📝 PATCH /api/admin/raffles/[id]/media - ID:", id);
+    if (gallery) {
+      const { error: delErr } = await supabase.from("raffle_media").delete().eq("raffle_id", id);
+      if (delErr) return NextResponse.json({ ok: false, error: delErr.message }, { status: 400 });
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
-    }
-
-    const body = await request.json();
-    console.log("📦 Body recibido en media PATCH:", body);
-
-    const { gallery } = body;
-
-    // Actualiza la galería si viene
-    if (Array.isArray(gallery)) {
-      console.log(`🔄 Actualizando galería con ${gallery.length} items`);
-
-      // Elimina items existentes
-      const { error: deleteError } = await supabase
-        .from("raffle_media")
-        .delete()
-        .eq("raffle_id", id);
-
-      if (deleteError) {
-        console.error("❌ Error eliminando galería anterior:", deleteError);
-      }
-
-      // Inserta los nuevos
-      if (gallery.length > 0) {
-        const rows = gallery.map((item: any) => ({
-          id: item.id,
+      if (gallery.length) {
+        const rows = gallery.map((g: any, i: number) => ({
+          id: g.id,                                   // si envías id existente lo respeta
           raffle_id: id,
-          type: item.type,
-          url: item.url,
-          order: item.order ?? 0,
+          type: g.type === "video" ? "video" : "image",
+          url: g.url,
+          order: Number.isFinite(g.order) ? g.order : i,
         }));
-
-        const { error: insertError } = await supabase.from("raffle_media").insert(rows as any[]);
-        if (insertError) {
-          console.error("❌ Error insertando galería:", insertError);
-          return NextResponse.json({ ok: false, error: insertError.message }, { status: 400 });
-        }
+        const { error: insErr } = await supabase.from("raffle_media").insert(rows as any[]);
+        if (insErr) return NextResponse.json({ ok: false, error: insErr.message }, { status: 400 });
       }
-
-      console.log("✅ Galería actualizada");
     }
-
-    console.log("✅ Media actualizada exitosamente");
 
     return NextResponse.json({ ok: true });
-  } catch (error: any) {
-    console.error("❌ Error en PATCH media:", error);
+  } catch {
     return NextResponse.json({ ok: false, error: "Error interno" }, { status: 500 });
+  }
+}
+
+/* ===================== PUT: Upsert institución bancaria ===================== */
+export async function PUT(request: Request, ctx: { params: { id: string } }) {
+  try {
+    const id = String(ctx?.params?.id || "");
+    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+
+    const supabase = getSupabaseFromRoute();
+    const body = await request.json().catch(() => ({}));
+    const bank = body?.bank;
+    if (!bank) return NextResponse.json({ ok: false, error: "Falta 'bank' en body" }, { status: 400 });
+
+    const payload = {
+      id: bank.id ?? undefined, // si viene undefined → insert, si viene UUID → update
+      raffle_id: id,
+      method: bank.type ?? bank.method ?? "transfer",
+      name: bank.name ?? "",
+      account: bank.account ?? null,
+      holder: bank.holder ?? null,
+      logo_url: bank.logo_url ?? null,
+      extra: bank.extra ?? null,
+      order: Number.isFinite(bank.order) ? bank.order : 0,
+    };
+
+    const { data, error } = await supabase
+      .from("bank_institutions")
+      .upsert(payload, { onConflict: "id" })
+      .select("*")
+      .single();
+
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    return NextResponse.json({ ok: true, item: data });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
+  }
+}
+
+/* ===================== DELETE: Eliminar institución ===================== */
+export async function DELETE(request: Request, ctx: { params: { id: string } }) {
+  try {
+    const id = String(ctx?.params?.id || "");
+    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+
+    const supabase = getSupabaseFromRoute();
+    const { searchParams } = new URL(request.url);
+    const bank_id = searchParams.get("bank_id");
+    if (!bank_id) return NextResponse.json({ ok: false, error: "bank_id requerido" }, { status: 400 });
+
+    const { error } = await supabase
+      .from("bank_institutions")
+      .delete()
+      .eq("id", bank_id)
+      .eq("raffle_id", id);
+
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
   }
 }
