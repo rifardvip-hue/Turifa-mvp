@@ -1,228 +1,223 @@
-// app/api/admin/raffles/[id]/media/route.ts
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+// app/api/admin/raffles/[id]/route.ts
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getSupabaseFromRoute() {
-  const cookieStore = cookies();
-  return createRouteHandlerClient({ cookies: () => cookieStore });
+// Cliente admin (SERVICE ROLE) → ignora RLS
+const admin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+// Utilidad para crear slugs
+function slugify(s: string) {
+  return (s || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "")
+    .slice(0, 60) || `rifa-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/* ===================== GET: Media (banner + galería) ===================== */
+/* ===================== GET detalle admin ===================== */
 export async function GET(
-  _req: Request,
+  _: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+
+  const { data: raffle, error } = await admin
+    .from("raffles")
+    .select(
+      `
+      *,
+      bank_institutions (*)
+    `
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !raffle) {
+    return NextResponse.json({ ok: false, error: error?.message || "Rifa no encontrada" }, { status: 404 });
+  }
+
+  const { data: media } = await admin
+    .from("raffle_media")
+    .select("id, type, url, order")
+    .eq("raffle_id", id)
+    .order("order", { ascending: true });
+
+  return NextResponse.json({
+    ok: true,
+    raffle: {
+      ...raffle,
+      banner_url: raffle.banner_url ?? raffle.media?.banner ?? null,
+      media: {
+        banner: raffle.banner_url ?? raffle.media?.banner ?? null,
+        gallery: (media ?? []).map((m) => ({
+          id: m.id,
+          type: (m.type as "image" | "video") || "image",
+          url: m.url,
+          order: m.order ?? 0,
+        })),
+        // Se usa en el editor como "Instituciones guardadas (DB)"
+        payments: (raffle.bank_institutions ?? []).map((b: any) => ({
+          id: b.id,
+          name: b.name,
+          type: b.method,
+          account: b.account ?? "",
+          holder: b.holder ?? "",
+          logo_url: b.logo_url ?? null,
+          order: b.order ?? 0,
+        })),
+      },
+    },
+  });
+}
+
+/* ===================== PATCH actualizar todo (+ slug automático) ===================== */
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+
   try {
-    const { id } = await params;
-    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+    const body = await req.json();
 
-    const supabase = getSupabaseFromRoute();
+    const title = String(body?.title ?? "");
+    const description = String(body?.description ?? "");
+    const bank_instructions = String(body?.bank_instructions ?? "");
+    const price = Number.isFinite(Number(body?.price)) ? Number(body?.price) : 0;
+    const total_tickets = Number.isFinite(Number(body?.total_tickets)) ? Number(body?.total_tickets) : 0;
 
-    const { data: raffle, error: raffleError } = await supabase
+    const banner_url = body?.banner_url ?? body?.media?.banner ?? null;
+    const gallery = Array.isArray(body?.media?.gallery) ? body.media.gallery : [];
+    const payments = Array.isArray(body?.media?.payments) ? body.media.payments : [];
+
+    // Traer rifa actual para decidir tema del slug
+    const { data: current, error: curErr } = await admin
       .from("raffles")
-      .select(`
-        *,
-        bank_institutions (
-          id, method, name, account, holder, logo_url, extra, "order"
-        )
-      `)
+      .select("id, slug")
       .eq("id", id)
       .maybeSingle();
 
-    if (raffleError || !raffle) {
-      return NextResponse.json({ ok: false, error: "Rifa no encontrada" }, { status: 404 });
+    if (curErr || !current) {
+      return NextResponse.json({ ok: false, error: curErr?.message || "Rifa no encontrada" }, { status: 404 });
     }
 
-    const { data: mediaItems } = await supabase
-      .from("raffle_media")
-      .select("id, type, url, order")
-      .eq("raffle_id", id)
-      .order("order", { ascending: true });
+    // Reglas para el slug:
+    // - Si el body trae slug no vacío → lo usamos (slugify + unicidad).
+    // - Si NO trae slug y el actual parece "inicial" (nueva-rifa...) → generamos desde el title.
+    // - Si no aplica nada, conservamos el actual.
+    let nextSlug: string | undefined = undefined;
 
-    const gallery = (mediaItems || []).map((m) => ({
-      id: m.id,
-      type: (m.type as "image" | "video") || "image",
-      url: m.url,
-      order: m.order ?? 0,
-    }));
-
-    return NextResponse.json({
-      ok: true,
-      raffle: {
-        ...raffle,
-        media: {
-          banner: (raffle as any).banner_url ?? (raffle as any).media?.banner ?? null,
-          gallery,
-          payments: (raffle as any).bank_institutions ?? [],
-        },
-      },
-    });
-  } catch (err: any) {
-    return NextResponse.json({ ok: false, error: "Error interno", details: err?.message }, { status: 500 });
-  }
-}
-
-/* ===================== POST: Subir archivos (galería / logos) ===================== */
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
-
-    const supabase = getSupabaseFromRoute();
-
-    const formData = await request.formData();
-    const single = (formData.get("file") as File) || null;
-    const many = (formData.getAll("files") as File[]).filter(Boolean);
-    const files: File[] = single ? [single, ...many] : many;
-
-    if (!files.length) {
-      return NextResponse.json({ ok: false, error: "No se enviaron archivos" }, { status: 400 });
-    }
-
-    const uploaded: Array<{ id: string; type: "image" | "video"; url: string; order: number }> = [];
-
-    for (const [idx, file] of files.entries()) {
-      const ext = (file.name.split(".").pop() || "bin").toLowerCase();
-      const safe = file.name.replace(/\s+/g, "-").replace(/[^\w.-]/g, "");
-      const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}.${ext}`;
-      const path = `raffles/${id}/${name}`;
-
-      const buf = new Uint8Array(await file.arrayBuffer());
-      const { error: upErr } = await supabase.storage
-        .from("raffles")
-        .upload(path, buf, {
-          contentType: file.type || "application/octet-stream",
-          upsert: false,
-        });
-
-      if (upErr) continue;
-
-      const { data: pub } = supabase.storage.from("raffles").getPublicUrl(path);
-      const url = pub?.publicUrl || "";
-
-      uploaded.push({
-        id: `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        type: (file.type || "").startsWith("video/") ? "video" : "image",
-        url,
-        order: idx,
-      });
-    }
-
-    if (!uploaded.length) {
-      return NextResponse.json({ ok: false, error: "No se pudo subir ningún archivo. Revisa permisos del bucket." }, { status: 500 });
-    }
-
-    return NextResponse.json({ ok: true, gallery: uploaded });
-  } catch (err: any) {
-    return NextResponse.json({ ok: false, error: "Error interno", details: err?.message }, { status: 500 });
-  }
-}
-
-/* ===================== PATCH: Persistir galería ===================== */
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
-
-    const supabase = getSupabaseFromRoute();
-    const body = await request.json().catch(() => ({}));
-    const gallery = Array.isArray(body?.gallery) ? body.gallery : null;
-
-    if (gallery) {
-      const { error: delErr } = await supabase.from("raffle_media").delete().eq("raffle_id", id);
-      if (delErr) return NextResponse.json({ ok: false, error: delErr.message }, { status: 400 });
-
-      if (gallery.length) {
-        const rows = gallery.map((g: any, i: number) => ({
-          id: g.id,
-          raffle_id: id,
-          type: g.type === "video" ? "video" : "image",
-          url: g.url,
-          order: Number.isFinite(g.order) ? g.order : i,
-        }));
-        const { error: insErr } = await supabase.from("raffle_media").insert(rows as any[]);
-        if (insErr) return NextResponse.json({ ok: false, error: insErr.message }, { status: 400 });
+    const bodySlugRaw = typeof body?.slug === "string" ? body.slug.trim() : "";
+    if (bodySlugRaw) {
+      nextSlug = slugify(bodySlugRaw);
+    } else {
+      const isDefaultSlug = !current.slug || current.slug.startsWith("nueva-rifa");
+      if (isDefaultSlug && title) {
+        nextSlug = slugify(title);
       }
     }
 
-    return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ ok: false, error: "Error interno" }, { status: 500 });
-  }
-}
+    // Asegurar unicidad si vamos a cambiarlo
+    if (nextSlug && nextSlug !== current.slug) {
+      const { data: conflict } = await admin
+        .from("raffles")
+        .select("id")
+        .eq("slug", nextSlug)
+        .maybeSingle();
+      if (conflict && conflict.id !== id) {
+        nextSlug = `${nextSlug}-${Math.random().toString(36).slice(2, 5)}`;
+      }
+    } else {
+      nextSlug = undefined; // no cambiar
+    }
 
-/* ===================== PUT: Upsert institución bancaria ===================== */
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+    // 1) Update principal
+    const { error: upErr } = await admin
+      .from("raffles")
+      .update({
+        title,
+        description,
+        bank_instructions,
+        price,
+        total_tickets,
+        banner_url,
+        media: { banner: banner_url },
+        ...(nextSlug ? { slug: nextSlug } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
 
-    const supabase = getSupabaseFromRoute();
-    const body = await request.json().catch(() => ({}));
-    const bank = body?.bank;
-    if (!bank) return NextResponse.json({ ok: false, error: "Falta 'bank' en body" }, { status: 400 });
+    if (upErr) return NextResponse.json({ ok: false, error: upErr.message }, { status: 400 });
 
-    const payload = {
-      id: bank.id ?? undefined,
-      raffle_id: id,
-      method: bank.type ?? bank.method ?? "transfer",
-      name: bank.name ?? "",
-      account: bank.account ?? null,
-      holder: bank.holder ?? null,
-      logo_url: bank.logo_url ?? null,
-      extra: bank.extra ?? null,
-      order: Number.isFinite(bank.order) ? bank.order : 0,
-    };
+    // 2) Reemplazar galería normalizada
+    await admin.from("raffle_media").delete().eq("raffle_id", id);
+    if (gallery.length) {
+      const rows = gallery.map((g: any, idx: number) => ({
+        raffle_id: id,
+        type: g.type === "video" ? "video" : "image",
+        url: g.url,
+        order: Number.isFinite(Number(g.order)) ? Number(g.order) : idx,
+      }));
+      const { error: galErr } = await admin.from("raffle_media").insert(rows as any[]);
+      if (galErr) return NextResponse.json({ ok: false, error: galErr.message }, { status: 400 });
+    }
 
-    const { data, error } = await supabase
+    // 3) Sincronizar instituciones bancarias
+    const { data: existing, error: exErr } = await admin
       .from("bank_institutions")
-      .upsert(payload, { onConflict: "id" })
-      .select("*")
-      .single();
-
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
-    return NextResponse.json({ ok: true, item: data });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
-  }
-}
-
-/* ===================== DELETE: Eliminar institución ===================== */
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
-
-    const supabase = getSupabaseFromRoute();
-    const { searchParams } = new URL(request.url);
-    const bank_id = searchParams.get("bank_id");
-    if (!bank_id) return NextResponse.json({ ok: false, error: "bank_id requerido" }, { status: 400 });
-
-    const { error } = await supabase
-      .from("bank_institutions")
-      .delete()
-      .eq("id", bank_id)
+      .select("id")
       .eq("raffle_id", id);
+    if (exErr) return NextResponse.json({ ok: false, error: exErr.message }, { status: 400 });
 
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
+    const payloadIds = new Set(
+      payments.map((p: any) => String(p.id || "")).filter((v) => v && !v.startsWith("p_"))
+    );
+    const existingIds = new Set((existing ?? []).map((e: any) => e.id as string));
+    const toDelete = [...existingIds].filter((x) => !payloadIds.has(x));
+    if (toDelete.length) {
+      await admin.from("bank_institutions").delete().in("id", toDelete);
+    }
+
+    const toInsert: any[] = [];
+    const toUpdate: any[] = [];
+    payments.forEach((p: any, idx: number) => {
+      const base = {
+        raffle_id: id,
+        method: String(p.type || "transfer"),
+        name: String(p.name || ""),
+        account: p.account || null,
+        holder: p.holder || null,
+        logo_url: p.logo_url || null,
+        order: Number.isFinite(Number(p.order)) ? Number(p.order) : idx,
+      };
+      const pid = String(p.id || "");
+      if (!pid || pid.startsWith("p_")) toInsert.push(base);
+      else toUpdate.push({ id: pid, ...base });
+    });
+
+    if (toInsert.length) {
+      const { error: insErr } = await admin.from("bank_institutions").insert(toInsert as any[]);
+      if (insErr) return NextResponse.json({ ok: false, error: insErr.message }, { status: 400 });
+    }
+    for (const row of toUpdate) {
+      const { id: bid, ...rest } = row;
+      const { error: upbErr } = await admin.from("bank_institutions").update(rest).eq("id", bid);
+      if (upbErr) return NextResponse.json({ ok: false, error: upbErr.message }, { status: 400 });
+    }
+
+    // Respuesta incluye el slug final para que el frontend sepa si cambió
+    return NextResponse.json({ ok: true, slug: nextSlug ?? current.slug });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: "Error interno", details: err?.message }, { status: 500 });
   }
 }
