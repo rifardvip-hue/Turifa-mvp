@@ -674,7 +674,8 @@ export default function RifaSlugPage() {
 
             <div className="relative">
               <p className="text-gray-300 whitespace-pre-wrap line-clamp-3">{raffle.description}</p>
-              <div className="pointer-events-none absolute bottom-0"use client";
+              <div className="pointer-events-none absolute bottom-0
+              "use client";
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
