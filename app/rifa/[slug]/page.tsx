@@ -325,11 +325,21 @@ async function handleSubmit() {
   setIsSubmitting(true);
   setSubmitSuccess(false);
 
-  try {
-    // 1. Subir comprobante SIN comprimir en el cliente
-    // El servidor se encargará de comprimir
+ try {
+    // Comprimir la imagen primero
+    const compressedFile = await compressImageSimple(selectedFile);
+    
+    console.log(`📦 Original: ${(selectedFile.size / 1024).toFixed(0)}KB → Comprimido: ${(compressedFile.size / 1024).toFixed(0)}KB`);
+
+    // Verificar tamaño después de comprimir
+    if (compressedFile.size > 3 * 1024 * 1024) {
+      setIsSubmitting(false);
+      return alert("La imagen sigue siendo muy grande después de comprimir. Por favor toma una foto de menor calidad.");
+    }
+
+    // Subir
     const up = new FormData();
-    up.append("file", selectedFile);
+    up.append("file", compressedFile);
     
     const resUp = await fetch("/api/upload/voucher", { 
       method: "POST", 
@@ -339,7 +349,7 @@ async function handleSubmit() {
     
     if (!resUp.ok || !upJson?.ok) {
       setIsSubmitting(false);
-      return alert("Error al subir el comprobante.");
+      return alert(upJson?.error || "Error al subir el comprobante.");
     }
 
     const { url: voucher_url, payment_id } = upJson;
