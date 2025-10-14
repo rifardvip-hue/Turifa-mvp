@@ -302,101 +302,107 @@ export default function RifaSlugPage() {
     return () => clearInterval(timer);
   }, [orderPending, paymentId]);
 
-  /* Envío de reserva - CORREGIDO */
-  async function handleSubmit() {
-    if (!raffle?.id) return;
-    if (!acceptedTerms) return alert("Debes aceptar los términos y condiciones.");
-    if (!selectedFile) return alert("Por favor adjunta la imagen del comprobante.");
-    if (!nombre.trim() || !telefono.trim()) return alert("Por favor completa nombre y teléfono.");
+// Solo la función handleSubmit modificada - reemplaza la función completa
 
-    // Validación de email .com si viene
-    if (correo.trim()) {
-      const cleaned = cleanEmail(correo);
-      if (!isValidEmailDotCom(cleaned)) {
-        return alert("Ingresa un email válido que termine en .com");
-      }
-    }
+async function handleSubmit() {
+  if (!raffle?.id) return;
+  if (!acceptedTerms) return alert("Debes aceptar los términos y condiciones.");
+  if (!selectedFile) return alert("Por favor adjunta la imagen del comprobante.");
+  if (!nombre.trim() || !telefono.trim()) return alert("Por favor completa nombre y teléfono.");
 
-    const transferInstitutions = (raffle.bank_institutions ?? []).filter((b) => b.method === "transfer");
-    const safeIndex = Math.min(Math.max(0, instIndex.transfer), Math.max(0, transferInstitutions.length - 1));
-    const chosen = transferInstitutions[safeIndex];
-
-    setIsSubmitting(true);
-    setSubmitSuccess(false);
-
-    try {
-      // 1. Subir comprobante
-      const up = new FormData();
-      up.append("file", selectedFile);
-      const resUp = await fetch("/api/upload/voucher", { method: "POST", body: up });
-      const upJson = await resUp.json();
-      
-      if (!resUp.ok || !upJson?.ok) {
-        setIsSubmitting(false);
-        return alert("Error al subir el comprobante.");
-      }
-
-      const { url: voucher_url, payment_id } = upJson;
-      setPaymentId(payment_id || null);
-
-      // 2. Crear reserva
-      const payload = {
-        raffle_id: raffle.id,
-        nombre,
-        telefono,
-        correo: cleanEmail(correo),
-        pay_method: "transfer",
-        boletos: Array.from({ length: ticketQuantity }, (_, i) => i + 1),
-        payment_id,
-        voucher_url,
-        slug,
-        quantity: ticketQuantity,
-        bank_institution_id: chosen?.id ?? null,
-      };
-
-      const resR = await fetch("/api/orders/create-reservation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const rJson = await resR.json().catch(() => null);
-      
-      if (!resR.ok || !rJson?.ok) {
-        setIsSubmitting(false);
-        return alert("Error al enviar la reserva.");
-      }
-
-      // 3. Éxito inmediato - resetear todo
-      setIsSubmitting(false);
-      setSubmitSuccess(true);
-      
-      // Limpiar formulario
-      setNombre("");
-      setTelefono("");
-      setCorreo("");
-      setSelectedFile(null);
-      setAcceptedTerms(false);
-      setTicketQuantity(1);
-      
-      // Desplazar suavemente hacia el mensaje de éxito
-      setTimeout(() => {
-        successRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-        });
-      }, 200);
-
-      // Ocultar el mensaje después de 30 segundos
-      setTimeout(() => {
-        setSubmitSuccess(false);
-      }, 30000);
-      
-    } catch (error) {
-      console.error("Error en handleSubmit:", error);
-      setIsSubmitting(false);
-      alert("Error inesperado. Intenta nuevamente.");
+  // Validación de email .com si viene
+  if (correo.trim()) {
+    const cleaned = cleanEmail(correo);
+    if (!isValidEmailDotCom(cleaned)) {
+      return alert("Ingresa un email válido que termine en .com");
     }
   }
+
+  const transferInstitutions = (raffle.bank_institutions ?? []).filter((b) => b.method === "transfer");
+  const safeIndex = Math.min(Math.max(0, instIndex.transfer), Math.max(0, transferInstitutions.length - 1));
+  const chosen = transferInstitutions[safeIndex];
+
+  setIsSubmitting(true);
+  setSubmitSuccess(false);
+
+  try {
+    // 1. Subir comprobante SIN comprimir en el cliente
+    // El servidor se encargará de comprimir
+    const up = new FormData();
+    up.append("file", selectedFile);
+    
+    const resUp = await fetch("/api/upload/voucher", { 
+      method: "POST", 
+      body: up 
+    });
+    const upJson = await resUp.json();
+    
+    if (!resUp.ok || !upJson?.ok) {
+      setIsSubmitting(false);
+      return alert("Error al subir el comprobante.");
+    }
+
+    const { url: voucher_url, payment_id } = upJson;
+    setPaymentId(payment_id || null);
+
+    // 2. Crear reserva
+    const payload = {
+      raffle_id: raffle.id,
+      nombre,
+      telefono,
+      correo: cleanEmail(correo),
+      pay_method: "transfer",
+      boletos: Array.from({ length: ticketQuantity }, (_, i) => i + 1),
+      payment_id,
+      voucher_url,
+      slug,
+      quantity: ticketQuantity,
+      bank_institution_id: chosen?.id ?? null,
+    };
+
+    const resR = await fetch("/api/orders/create-reservation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const rJson = await resR.json().catch(() => null);
+    
+    if (!resR.ok || !rJson?.ok) {
+      setIsSubmitting(false);
+      return alert("Error al enviar la reserva.");
+    }
+
+    // 3. Éxito inmediato - resetear todo
+    setIsSubmitting(false);
+    setSubmitSuccess(true);
+    
+    // Limpiar formulario
+    setNombre("");
+    setTelefono("");
+    setCorreo("");
+    setSelectedFile(null);
+    setAcceptedTerms(false);
+    setTicketQuantity(1);
+    
+    // Desplazar suavemente hacia el mensaje de éxito
+    setTimeout(() => {
+      successRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }, 200);
+
+    // Ocultar el mensaje después de 30 segundos
+    setTimeout(() => {
+      setSubmitSuccess(false);
+    }, 30000);
+    
+  } catch (error) {
+    console.error("Error en handleSubmit:", error);
+    setIsSubmitting(false);
+    alert("Error inesperado. Intenta nuevamente.");
+  }
+}
 
   /* Búsqueda unificada (tel / email / 4 dígitos) con fallbacks para evitar 404 */
   async function handleUnifiedSearch() {
