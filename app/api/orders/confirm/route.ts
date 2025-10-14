@@ -39,16 +39,14 @@ async function generateUniqueTicketsForOrder(
     attempts++;
     const num = random4int();
 
-    const { error } = await supabase
-      .from("tickets")
-      .insert([
-        {
-          raffle_id,
-          number: num,
-          status: "paid",
-          reservation_expires_at: null,
-        },
-      ]);
+    const { error } = await supabase.from("tickets").insert([
+      {
+        raffle_id,
+        number: num,
+        status: "paid",
+        reservation_expires_at: null,
+      },
+    ]);
 
     if (!error) {
       created.push(num);
@@ -142,13 +140,27 @@ export async function POST(req: NextRequest) {
     // 5) Obtener info de la rifa para el asunto del correo
     const { data: raffle } = await supabase
       .from("raffles")
-      .select("title, price, slug")
+      .select("title, price, slug, banner_url") // ← añadimos banner_url
       .eq("id", order.raffle_id)
       .maybeSingle();
 
     const raffleTitle = raffle?.title ?? "Tu Rifa";
     const unitPrice = Number(raffle?.price ?? 0);
     const totalPaid = unitPrice * qty;
+
+    // Dominio del sitio (quita barras al final)
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") ||
+      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ||
+      "https://turifahoy.com";
+
+    const raffleUrl = raffle?.slug ? `${siteUrl}/rifa/${raffle.slug}` : siteUrl;
+
+    // Banner de la rifa o placeholder
+    const bannerUrl =
+      typeof raffle?.banner_url === "string" && raffle.banner_url
+        ? raffle.banner_url
+        : "https://via.placeholder.com/1200x600?text=Tu+Rifa+Hoy";
 
     // 6) Armar y enviar correo (si hay correo del cliente) — HTML con estilos inline
     if (order.correo) {
@@ -157,8 +169,8 @@ export async function POST(req: NextRequest) {
       const ticketsArray = formatted.map(String);
       const quantity = ticketsArray.length;
       const totalLabel = `RD$ ${totalPaid.toLocaleString("es-DO")}`;
-      const raffleUrl = `${(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000") + (raffle?.slug ? "/rifa/" + raffle.slug : "")}`;
-      const voucherUrl = typeof order.voucher_url === "string" && order.voucher_url ? order.voucher_url : undefined;
+      const voucherUrl =
+        typeof order.voucher_url === "string" && order.voucher_url ? order.voucher_url : undefined;
 
       const pill = (t: string) =>
         `<span style="display:inline-block;padding:10px 14px;border-radius:999px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:700;letter-spacing:1px">${esc(
@@ -184,6 +196,9 @@ export async function POST(req: NextRequest) {
         </td></tr>
 
         <tr><td style="padding:24px;">
+          <img src="${bannerUrl}" alt="${esc(raffleTitle)}"
+               style="width:100%;height:auto;display:block;border-radius:8px;margin:4px 0 16px 0;" />
+
           <h1 style="margin:0 0 10px 0;font-size:20px;line-height:1.4;">${esc(raffleTitle)}</h1>
           <p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;">
             Hola ${esc(order.name ?? "Cliente")},<br/>
@@ -206,16 +221,12 @@ export async function POST(req: NextRequest) {
             </td></tr>
           </table>
 
-          ${
-            raffle?.slug
-              ? `<div style="margin:18px 0;">
-                   <a href="${raffleUrl}" target="_blank"
-                      style="display:inline-block;background:#16a34a;color:white;text-decoration:none;padding:12px 16px;border-radius:8px;font-weight:700;">
-                     Ver rifa
-                   </a>
-                 </div>`
-              : ``
-          }
+          <div style="margin:18px 0;">
+            <a href="${raffleUrl}" target="_blank"
+               style="display:inline-block;background:#16a34a;color:white;text-decoration:none;padding:12px 16px;border-radius:8px;font-weight:700;">
+              Ver rifa
+            </a>
+          </div>
 
           ${
             voucherUrl
@@ -224,6 +235,10 @@ export async function POST(req: NextRequest) {
                  </p>`
               : ``
           }
+
+          <p style="margin:18px 0 0 0;font-size:14px;">
+            🍀 <strong>¡Mucha suerte en el sorteo!</strong>
+          </p>
 
           <p style="margin:24px 0 0 0;font-size:12px;color:#6b7280;">
             Si no realizaste esta compra, responde a este correo de inmediato.
@@ -253,8 +268,9 @@ export async function POST(req: NextRequest) {
         `Boletos: ${ticketsArray.join(", ")}`,
         `Cantidad: ${quantity}`,
         `Total: ${totalLabel}`,
-        raffle?.slug ? `Ver rifa: ${raffleUrl}` : ``,
+        `Ver rifa: ${raffleUrl}`,
         voucherUrl ? `Comprobante: ${voucherUrl}` : ``,
+        `¡Mucha suerte en el sorteo!`,
       ].join("\n");
 
       const res = await sendRaffleEmail({
