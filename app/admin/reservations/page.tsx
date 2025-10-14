@@ -15,7 +15,7 @@ type Row = {
   created_at: string;
   // opcionales si tu API ya los manda
   quantity?: number;
-  price?: number;
+  price?: number; // RD$ por boleto
 };
 
 type RaffleOption = { id: string; slug: string; title: string };
@@ -37,6 +37,24 @@ function toDigitsList(tb: any): string[] {
   return [];
 }
 
+/** Cuenta la cantidad de boletos en una fila de la forma más robusta posible. */
+function countTickets(row: Row): number {
+  // 1) si quantity viene desde el backend
+  if (typeof row.quantity === "number" && row.quantity > 0) return row.quantity;
+
+  // 2) si ya trae los bloques/tickets
+  const fromBlocks = toDigitsList(row.ticket_blocks).length;
+  if (fromBlocks > 0) return fromBlocks;
+
+  // 3) fallback por monto/price (si price = RD$ por boleto)
+  if (typeof row.price === "number" && row.price > 0) {
+    const total = Number(row.amount_cents || 0) / 100;
+    const approx = Math.floor(total / row.price);
+    if (approx > 0) return approx;
+  }
+  return 0;
+}
+
 export default function AdminReservationsPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>("");
@@ -56,8 +74,21 @@ export default function AdminReservationsPage() {
   const [loadingTickets, setLoadingTickets] = useState(false);
 
   const totalRD$ = useMemo(
+    () => rows.reduce((acc, r) => acc + Number(r.amount_cents || 0) / 100, 0),
+    [rows]
+  );
+
+  // 🔢 NUEVO: contadores de boletos
+  const totalTicketsVendidos = useMemo(
+    () => rows.reduce((acc, r) => acc + countTickets(r), 0),
+    [rows]
+  );
+
+  const totalTicketsConfirmados = useMemo(
     () =>
-      rows.reduce((acc, r) => acc + Number(r.amount_cents || 0) / 100, 0),
+      rows
+        .filter((r) => r.status === "confirmed")
+        .reduce((acc, r) => acc + countTickets(r), 0),
     [rows]
   );
 
@@ -73,7 +104,6 @@ export default function AdminReservationsPage() {
           title: r.title ?? r.slug,
         }));
         setRaffles(opts);
-        // si ya tienes una sola activa, podrías preseleccionarla aquí
       }
     } catch {
       /* no-op */
@@ -105,23 +135,20 @@ export default function AdminReservationsPage() {
 
     const ua = navigator.userAgent || "";
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
 
     try {
       if (isIOS) {
-        // iOS: navegación directa tiene mayor probabilidad de éxito que window.open
         window.location.href = waMe;
         return;
       }
       if (isMobile) {
-        // Android u otros móviles: wa.me funciona bien
         window.location.href = waMe;
         return;
       }
-      // Desktop: abre WhatsApp Web
       window.open(waWeb, "_blank", "noopener,noreferrer");
     } catch {
-      // Fallback universal
       window.location.href = waMe;
     }
   }
@@ -167,11 +194,7 @@ export default function AdminReservationsPage() {
   // ---------- acciones ----------
   async function confirm(order: Row) {
     const prev = [...rows];
-    setRows((r) =>
-      r.map((x) =>
-        x.id === order.id ? { ...x, status: "confirmed" } : x
-      )
-    );
+    setRows((r) => r.map((x) => (x.id === order.id ? { ...x, status: "confirmed" } : x)));
 
     try {
       // 1) tu endpoint actual (si existe)
@@ -181,7 +204,7 @@ export default function AdminReservationsPage() {
         cache: "no-store",
       });
 
-      // 2) si no existe o falla, fallback idempotente
+      // 2) fallback idempotente
       if (!res.ok) {
         res = await fetch(`/api/orders/confirm`, {
           method: "POST",
@@ -211,7 +234,7 @@ export default function AdminReservationsPage() {
         /* puede que el endpoint no devuelva JSON */
       }
 
-      // abrir WhatsApp con mensaje
+      // abrir WhatsApp
       openWhatsAppMessage(order, confirmedTickets);
 
       await fetchData(page);
@@ -289,15 +312,32 @@ export default function AdminReservationsPage() {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold">🎫 Administrar Reservas</h1>
-              <p className="text-blue-100 text-sm mt-1">
-                Gestiona todas las reservas de rifas
-              </p>
+              <p className="text-blue-100 text-sm mt-1">Gestiona todas las reservas de rifas</p>
             </div>
-            <div className="flex items-center gap-3">
+
+            {/* KPIs */}
+            <div className="flex items-center gap-3 flex-wrap">
               <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 sm:px-6 py-3 border border-white/30">
                 <p className="text-xs text-blue-100 mb-1">Total en página</p>
                 <p className="text-xl sm:text-2xl font-bold">RD${totalRD$.toFixed(2)}</p>
               </div>
+
+              {/* NUEVO: Tickets vendidos */}
+              <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 sm:px-6 py-3 border border-white/30">
+                <p className="text-xs text-blue-100 mb-1">Tickets vendidos</p>
+                <p className="text-xl sm:text-2xl font-bold">
+                  {totalTicketsVendidos.toLocaleString()}
+                </p>
+              </div>
+
+              {/* NUEVO: Tickets confirmados */}
+              <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 sm:px-6 py-3 border border-white/30">
+                <p className="text-xs text-blue-100 mb-1">Tickets confirmados</p>
+                <p className="text-xl sm:text-2xl font-bold">
+                  {totalTicketsConfirmados.toLocaleString()}
+                </p>
+              </div>
+
               <button
                 onClick={() => (window.location.href = "/admin/rifas")}
                 className="bg-white text-purple-600 px-4 sm:px-6 py-3 rounded-xl font-semibold hover:bg-blue-50 transition-all flex items-center gap-2 shadow-lg"
@@ -541,7 +581,9 @@ export default function AdminReservationsPage() {
                   <div className="flex items-start gap-3">
                     <span className="text-2xl">💵</span>
                     <div className="flex-1">
-                      <p className="text-xs text-gray-500 uppercase font-semibold">Precio por boleto</p>
+                      <p className="text-xs text-gray-500 uppercase font-semibold">
+                        Precio por boleto
+                      </p>
                       <p className="text-gray-900 font-medium">
                         RD${Number(selected.price ?? 0).toFixed(2)}
                       </p>
@@ -645,11 +687,7 @@ export default function AdminReservationsPage() {
             </div>
             <div className="p-4 bg-gray-50">
               <div className="w-full h-[70vh] bg-white rounded-xl shadow-inner p-2">
-                <img
-                  src={voucher}
-                  alt="Voucher"
-                  className="w-full h-full object-contain"
-                />
+                <img src={voucher} alt="Voucher" className="w-full h-full object-contain" />
               </div>
             </div>
           </div>
@@ -694,9 +732,7 @@ export default function AdminReservationsPage() {
 
               <div className="mt-5 flex justify-end gap-2">
                 <button
-                  onClick={() =>
-                    navigator.clipboard.writeText(tickets.join(", "))
-                  }
+                  onClick={() => navigator.clipboard.writeText(tickets.join(", "))}
                   className="px-3 py-2 rounded-lg bg-gray-200 hover:bg-gray-300"
                 >
                   Copiar
