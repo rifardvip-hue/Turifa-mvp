@@ -303,6 +303,68 @@ export default function RifaSlugPage() {
   }, [orderPending, paymentId]);
 
 // Solo la función handleSubmit modificada - reemplaza la función completa
+// ===============================
+// 📦 Función de compresión simple
+// ===============================
+async function compressImageSimple(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.size < 500 * 1024) {
+    return file; // no comprime imágenes pequeñas
+  }
+
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      const img = new Image();
+
+      img.onload = () => {
+        const maxDim = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = (height / width) * maxDim;
+            width = maxDim;
+          } else {
+            width = (width / height) * maxDim;
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              resolve(new File([blob], file.name, { type: "image/jpeg" }));
+            } else {
+              resolve(file);
+            }
+          },
+          "image/jpeg",
+          0.6 // calidad de compresión (0.0–1.0)
+        );
+      };
+
+      img.onerror = () => resolve(file);
+      img.src = e.target?.result as string;
+    };
+
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
 
 async function handleSubmit() {
   if (!raffle?.id) return;
