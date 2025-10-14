@@ -153,6 +153,7 @@ export default function RifaSlugPage() {
 
   const [raffle, setRaffle] = useState<RaffleResp | null>(null);
   const [loading, setLoading] = useState(true);
+    const successRef = useRef<HTMLDivElement>(null);
 
   // UI / compra
   const [ticketQuantity, setTicketQuantity] = useState<number>(1);
@@ -377,13 +378,19 @@ async function handleSubmit() {
     setAcceptedTerms(false);
     setTicketQuantity(1);
     
-    // Scroll al mensaje de éxito
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    
-    // Resetear el mensaje de éxito después de 20 segundos
-    setTimeout(() => {
-      setSubmitSuccess(false);
-    }, 20000);
+ // Desplazar suavemente hacia el mensaje de éxito en lugar del inicio
+setTimeout(() => {
+  successRef.current?.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest", // evita que suba al tope de la página
+  });
+}, 200);
+
+// Ocultar el mensaje después de 30 segundos (igual que antes)
+setTimeout(() => {
+  setSubmitSuccess(false);
+}, 30000);
+
     
   } catch (error) {
     console.error("Error en handleSubmit:", error);
@@ -636,24 +643,29 @@ async function handleSubmit() {
       <main className="max-w-2xl mx-auto px-4 mt-6 relative z-10 pb-20 space-y-4">
         {/* Mensaje de éxito después de enviar */}
         {submitSuccess && (
-          <div className="bg-gradient-to-br from-green-900/60 to-emerald-900/60 rounded-2xl p-6 border border-green-500/40 shadow-xl">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center shadow-lg">
-                <span className="text-white text-2xl font-bold">✓</span>
-              </div>
-              <div>
-                <h3 className="text-white font-bold text-lg">¡Reserva enviada exitosamente!</h3>
-                <p className="text-green-200 text-sm">Tu solicitud ha sido recibida</p>
-              </div>
-            </div>
-            <div className="bg-black/30 rounded-xl p-4 mt-4">
-              <p className="text-white text-sm leading-relaxed">
-                ⏳ <strong>Estamos validando tu pago.</strong> En breve recibirás la confirmación de tus boletos.
-                Te notificaremos por WhatsApp y correo electrónico.
-              </p>
-            </div>
-          </div>
-        )}
+  <div
+    ref={successRef}
+    className="rounded-xl border-2 border-green-500 bg-green-50 p-6 shadow-lg scroll-mt-24"
+  >
+    <div className="flex items-center gap-3 mb-2">
+      <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center">
+        <span className="text-white text-2xl">✓</span>
+      </div>
+      <div>
+        <div className="font-bold text-green-800 text-lg">¡Reserva enviada exitosamente!</div>
+        <p className="text-green-700 text-sm">Tu solicitud ha sido recibida correctamente</p>
+      </div>
+    </div>
+
+    <div className="bg-green-100 rounded-lg p-4 mt-3">
+      <p className="text-green-800 text-sm">
+        ⏳ <strong>Estamos validando tu pago.</strong> En breve recibirás la confirmación de tus boletos
+        por WhatsApp y correo electrónico.
+      </p>
+    </div>
+  </div>
+)}
+
 
         {/* Descripción con modal */}
         {raffle.description && raffle.description.trim() && (
