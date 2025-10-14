@@ -1,10 +1,17 @@
-﻿// ✅ app/rifa/[slug]/page.tsx
+﻿// ✅ app/rifa/[slug]/page.tsx - CON UPLOAD DE IMAGEN
 "use client";
 
 import { useEffect, useRef, useState, ChangeEvent } from "react";
 import { useParams } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 import TicketGrid from "@/components/TicketGrid";
 import TicketStack from "@/components/TicketStack";
+
+// Cliente de Supabase (lado cliente)
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 type Raffle = {
   id: string;
@@ -28,17 +35,13 @@ export default function RifaSlugPage() {
 
   const [raffle, setRaffle] = useState<Raffle | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // 🔢 cantidad y selección de números
   const [ticketQuantity, setTicketQuantity] = useState<number>(1);
   const [selectedBlocks, setSelectedBlocks] = useState<number[][]>([]);
-
-  // Estados del formulario
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<string>("");
 
-  // Refs
   const successRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -63,106 +66,171 @@ export default function RifaSlugPage() {
   if (loading) return <p className="text-center mt-10">Cargando...</p>;
   if (!raffle?.id) return <p className="text-center mt-10 text-red-600">Rifa no encontrada.</p>;
 
-  // 🧮 total
   const unitPrice = Number(raffle.price ?? 0) || 0;
   const total = ticketQuantity * unitPrice;
 
-  // manejar input de cantidad (1..10)
   const onCantidadChange = (e: ChangeEvent<HTMLInputElement>) => {
     const raw = Number(e.target.value || 1);
     const v = Math.max(1, Math.min(10, isNaN(raw) ? 1 : raw));
     setTicketQuantity(v);
   };
 
-  // lista plana de números seleccionados
   const selectedNumbers = selectedBlocks.flat();
 
-  // Comprimir imagen si pesa > 500KB
+  // 🚀 Compresión optimizada
   async function compressImage(file: File): Promise<File> {
-    if (!/^image\//.test(file.type) || file.size < 500 * 1024) return file;
+    if (!/^image\//.test(file.type) || file.size < 300 * 1024) return file;
 
     return new Promise((resolve) => {
       const reader = new FileReader();
+      reader.onerror = () => resolve(file);
+      
       reader.onload = (e) => {
         const img = new Image();
+        img.onerror = () => resolve(file);
+        
         img.onload = () => {
-          const canvas = document.createElement("canvas");
-          const maxWidth = 1200;
-          const scale = Math.min(1, maxWidth / img.width);
-          canvas.width = Math.round(img.width * scale);
-          canvas.height = Math.round(img.height * scale);
-          const ctx = canvas.getContext("2d")!;
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                resolve(
-                  new File([blob], file.name.replace(/\.\w+$/, ".jpg"), {
-                    type: "image/jpeg",
-                    lastModified: Date.now(),
-                  })
-                );
-              } else {
-                resolve(file);
-              }
-            },
-            "image/jpeg",
-            0.8
-          );
+          try {
+            const canvas = document.createElement("canvas");
+            const maxSize = 800;
+            let { width, height } = img;
+            
+            if (width > height && width > maxSize) {
+              height = (height * maxSize) / width;
+              width = maxSize;
+            } else if (height > maxSize) {
+              width = (width * maxSize) / height;
+              height = maxSize;
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            const ctx = canvas.getContext("2d", { alpha: false });
+            if (!ctx) {
+              resolve(file);
+              return;
+            }
+            
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = "medium";
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            canvas.toBlob(
+              (blob) => {
+                if (blob && blob.size < file.size) {
+                  resolve(
+                    new File([blob], file.name.replace(/\.\w+$/, ".jpg"), {
+                      type: "image/jpeg",
+                      lastModified: Date.now(),
+                    })
+                  );
+                } else {
+                  resolve(file);
+                }
+              },
+              "image/jpeg",
+              0.7
+            );
+          } catch {
+            resolve(file);
+          }
         };
+        
         img.src = e.target?.result as string;
       };
+      
       reader.readAsDataURL(file);
     });
   }
 
-  // Submit
+  // 🚀 Subir imagen a Supabase Storage
+  async function uploadVoucher(file: File): Promise<string> {
+    setUploadProgress("Comprimiendo imagen...");
+    const compressed = await compressImage(file);
+    
+    setUploadProgress("Subiendo comprobante...");
+    
+    // Nombre único para evitar colisiones
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    const ext = compressed.name.split(".").pop() || "jpg";
+    const fileName = `vouchers/${raffle.id}/${timestamp}-${randomStr}.${ext}`;
+
+    const { data, error } = await supabase.storage
+      .from("rifas-bucket") // 👈 Cambia esto por el nombre de tu bucket
+      .upload(fileName, compressed, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (error) {
+      console.error("Upload error:", error);
+      throw new Error("No se pudo subir el comprobante");
+    }
+
+    // Obtener URL pública
+    const { data: urlData } = supabase.storage
+      .from("rifas-bucket")
+      .getPublicUrl(data.path);
+
+    return urlData.publicUrl;
+  }
+
+  // 🚀 Submit optimizado
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (submitting) return;
-
-    // Guardia adicional por seguridad (además del render-guard)
-    if (!raffle?.id) {
-      setErrorMsg("No se pudo cargar la rifa. Recarga la página e inténtalo de nuevo.");
-      return;
-    }
+    if (submitting || !raffle?.id) return;
 
     setSubmitting(true);
     setSuccess(false);
     setErrorMsg(null);
+    setUploadProgress("");
 
     try {
       const formData = new FormData(e.currentTarget);
 
-      // Validaciones básicas
+      // Validaciones
       const nombre = String(formData.get("nombre") || "").trim();
       const telefono = String(formData.get("telefono") || "").trim();
-      if (!nombre || !telefono) {
-        throw new Error("Nombre y teléfono son obligatorios.");
+      const correo = String(formData.get("correo") || "").trim() || null;
+
+      if (!nombre || nombre.length < 2) {
+        throw new Error("El nombre debe tener al menos 2 caracteres");
+      }
+      if (!telefono) {
+        throw new Error("El teléfono es obligatorio");
       }
 
-      // Comprimir imagen si existe
+      // 📤 Subir comprobante
       const voucherFile = formData.get("voucher") as File | null;
-      if (voucherFile && voucherFile.size > 0) {
-        const compressed = await compressImage(voucherFile);
-        formData.set("voucher", compressed);
+      if (!voucherFile || voucherFile.size === 0) {
+        throw new Error("Debes subir un comprobante de pago");
       }
 
-      // Metadata obligatoria
-      formData.set("raffle_id", raffle.id);
-      formData.set("slug", slug);
-      formData.set("quantity", String(ticketQuantity));
-      if (selectedNumbers.length > 0) {
-        formData.set("selected_digits", JSON.stringify(selectedNumbers));
-      }
+      const voucherUrl = await uploadVoucher(voucherFile);
 
-      // Enviar con timeout
+      // 📨 Enviar reserva
+      setUploadProgress("Creando reserva...");
+
+      const payload = {
+        raffle_id: raffle.id,
+        nombre,
+        telefono,
+        correo,
+        quantity: ticketQuantity,
+        voucher_url: voucherUrl,
+        boletos: selectedNumbers.length > 0 ? selectedNumbers : null,
+        notas: null,
+      };
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30_000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const response = await fetch("/api/orders/create-reservation", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
 
@@ -173,24 +241,31 @@ export default function RifaSlugPage() {
         throw new Error(errorData.error || `Error ${response.status}`);
       }
 
-      // Éxito
+      // ✅ Éxito
       setSuccess(true);
+      setUploadProgress("");
       formRef.current?.reset();
       setSelectedBlocks([]);
       setTicketQuantity(1);
 
       setTimeout(() => {
-        successRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        successRef.current?.scrollIntoView({ 
+          behavior: "smooth", 
+          block: "center" 
+        });
       }, 100);
+      
     } catch (err: any) {
       console.error("Error en reserva:", err);
-      setErrorMsg(
-        err?.name === "AbortError"
-          ? "La solicitud tardó demasiado. Por favor intenta de nuevo."
-          : err?.message || "Error al enviar la reserva. Intenta de nuevo."
-      );
+      
+      if (err?.name === "AbortError") {
+        setErrorMsg("La solicitud tardó demasiado. Verifica tu conexión e intenta de nuevo.");
+      } else {
+        setErrorMsg(err?.message || "Error al procesar la reserva. Intenta de nuevo.");
+      }
     } finally {
       setSubmitting(false);
+      setUploadProgress("");
     }
   }
 
@@ -200,6 +275,7 @@ export default function RifaSlugPage() {
         src={raffle.banner_url || "https://via.placeholder.com/600x300"}
         alt="Banner"
         className="w-full rounded-lg shadow-md"
+        loading="lazy"
       />
 
       <div className="text-center">
@@ -210,7 +286,7 @@ export default function RifaSlugPage() {
         )}
       </div>
 
-      {/* ---------- Mensajes de estado ---------- */}
+      {/* Mensajes de estado */}
       {success && (
         <div
           ref={successRef}
@@ -238,12 +314,21 @@ export default function RifaSlugPage() {
 
       {errorMsg && (
         <div className="rounded-xl border-2 border-red-500 bg-red-50 p-4">
-          <div className="font-semibold text-red-800 mb-1">❌ Error al enviar</div>
+          <div className="font-semibold text-red-800 mb-1">❌ Error</div>
           <p className="text-red-700 text-sm">{errorMsg}</p>
         </div>
       )}
 
-      {/* ---------- Selección de boletos ---------- */}
+      {uploadProgress && (
+        <div className="rounded-lg border border-blue-300 bg-blue-50 p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-blue-800 text-sm font-medium">{uploadProgress}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Selección de boletos */}
       <section className="space-y-3">
         <h2 className="text-center font-semibold">Tus boletos</h2>
 
@@ -271,13 +356,14 @@ export default function RifaSlugPage() {
         </div>
       </section>
 
-      {/* ---------- Formulario ---------- */}
+      {/* Formulario */}
       <form ref={formRef} className="space-y-4" onSubmit={handleSubmit}>
         <input
           name="nombre"
           placeholder="Nombre completo"
           required
           disabled={submitting}
+          minLength={2}
           className="w-full border p-3 rounded-md disabled:opacity-50 disabled:bg-gray-100"
           autoComplete="name"
         />
@@ -347,7 +433,7 @@ export default function RifaSlugPage() {
             className="w-full disabled:opacity-50"
           />
           <p className="text-xs text-gray-500 mt-1">
-            Sube una foto o captura del comprobante
+            Sube una foto del comprobante (máx. 5MB)
           </p>
         </div>
 
@@ -359,7 +445,7 @@ export default function RifaSlugPage() {
           {submitting ? (
             <span className="flex items-center justify-center gap-2">
               <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              Reservando...
+              {uploadProgress || "Procesando..."}
             </span>
           ) : (
             "✅ Enviar reserva"
