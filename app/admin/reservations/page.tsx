@@ -82,28 +82,48 @@ export default function AdminReservationsPage() {
 
   // ---------- util: sanitizar teléfono y abrir WhatsApp ----------
   function openWhatsAppMessage(order: Row, ticketList: string[]) {
-    // mensaje similar al correo
+    // Mensaje
     const lines: string[] = [];
     lines.push(`Hola ${order.customer_name || ""} 👋`);
     lines.push(`Tu pago fue confirmado ✅`);
     lines.push(`Rifa: ${order.raffle_slug}`);
     const amount = (Number(order.amount_cents || 0) / 100).toFixed(2);
     lines.push(`Monto: RD$ ${amount}`);
-    if (ticketList.length) {
-      lines.push(`Boletos: ${ticketList.join(", ")}`);
-    }
+    if (ticketList.length) lines.push(`Boletos: ${ticketList.join(", ")}`);
     lines.push(`¡Gracias por participar y mucha suerte! 🍀`);
+    const msg = encodeURIComponent(lines.join("\n"));
 
-    const msg = lines.join("\n");
-    // sanitizar teléfono (solo dígitos)
+    // Teléfono E.164 sin "+" (ej: 18296010824)
     const raw = (order.customer_phone || "").replace(/\D+/g, "");
-    // si son 10 dígitos (DR), anteponer 1
-    const phone =
-      raw.length === 10 ? `1${raw}` : raw.length >= 11 ? raw : "";
+    const phone = raw.length === 10 ? `1${raw}` : raw.length >= 11 ? raw : ""; // DO = +1
 
-    const base = phone ? `https://wa.me/${phone}` : `https://wa.me/`;
-    const url = `${base}?text=${encodeURIComponent(msg)}`;
-    window.open(url, "_blank");
+    // URLs oficiales
+    const waMe = phone ? `https://wa.me/${phone}?text=${msg}` : `https://wa.me/?text=${msg}`;
+    const waWeb = phone
+      ? `https://web.whatsapp.com/send?phone=${phone}&text=${msg}`
+      : `https://web.whatsapp.com/send?text=${msg}`;
+
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+
+    try {
+      if (isIOS) {
+        // iOS: navegación directa tiene mayor probabilidad de éxito que window.open
+        window.location.href = waMe;
+        return;
+      }
+      if (isMobile) {
+        // Android u otros móviles: wa.me funciona bien
+        window.location.href = waMe;
+        return;
+      }
+      // Desktop: abre WhatsApp Web
+      window.open(waWeb, "_blank", "noopener,noreferrer");
+    } catch {
+      // Fallback universal
+      window.location.href = waMe;
+    }
   }
 
   // ---------- DATA ----------

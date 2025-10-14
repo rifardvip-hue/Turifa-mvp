@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { sendRaffleEmail } from "@/lib/mailer";
 import { buildRaffleEmail } from "@/lib/emailTemplates";
 
+export const runtime = "nodejs";         // ← asegura envío HTML
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
