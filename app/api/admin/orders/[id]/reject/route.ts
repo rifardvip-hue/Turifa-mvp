@@ -17,7 +17,7 @@ export async function POST(_req: Request, context: any) {
 
   // 1) Validar admin (cookies() es síncrono)
   const cookieStore = cookies();
-  const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
+  const supabaseUser = createRouteHandlerClient({ cookies });
   const {
     data: { user },
     error: userErr,

@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   try {
     // ✅ Forma correcta: obtener cookieStore y pasarlo como closure
     const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+    const supabase = createRouteHandlerClient({ cookies });
 
     const form = await req.formData();
     const file = (form.get("file") || form.get("voucher")) as File | null;

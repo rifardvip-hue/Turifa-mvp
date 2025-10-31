@@ -12,8 +12,8 @@ export async function GET(_req: Request, context: any) {
   }
 
   // cookies() es síncrono en route handlers
-  const cookieStore = await cookies();
-   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+  const cookieStore = cookies();
+   const supabase = createRouteHandlerClient({ cookies });
   // Guard: admin
   const { data: { user } = { user: null } } = await supabase.auth.getUser();
   if (!user || user.user_metadata?.role !== "admin") {

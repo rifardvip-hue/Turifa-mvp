@@ -9,7 +9,7 @@ import { cookies } from "next/headers";
  */
 export async function GET(req: Request) {
 const cookieStore = cookies();
-const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+const supabase = createRouteHandlerClient({ cookies });
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") || "").trim();
   const status = (searchParams.get("status") || "").trim(); // "", "pending_review", "confirmed", "rejected"

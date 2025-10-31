@@ -13,8 +13,8 @@ export async function PATCH(request: Request, context: any) {
     }
 
     // cookies() es síncrono en route handlers
-    const cookieStore = await cookies();
-const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+    const cookieStore = cookies();
+const supabase = createRouteHandlerClient({ cookies });
 
     // Verifica autenticación (admin)
     const { data: { session } = { session: null } } = await supabase.auth.getSession();
