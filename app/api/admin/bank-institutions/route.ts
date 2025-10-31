@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const supa = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! // si tu RLS lo requiere, usa SERVICE_ROLE en server
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // si tu RLS lo requiere, usa SERVICE_ROLE en server
 );
 
 // GET /api/admin/bank-institutions?raffle_id=UUID

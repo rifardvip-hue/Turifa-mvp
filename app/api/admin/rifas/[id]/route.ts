@@ -11,9 +11,99 @@ const admin = createClient(
 );
 
 // ─────────────────────────────────────────────
+// GET /api/admin/rifas/[id]
+// Obtener una rifa por ID
+// ─────────────────────────────────────────────
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  
+  if (!id) {
+    return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+  }
+
+  try {
+    const { data: raffle, error } = await admin
+      .from("raffles")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error || !raffle) {
+      return NextResponse.json(
+        { ok: false, error: "Rifa no encontrada" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, raffle });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: "Error interno", details: e?.message },
+      { status: 500 }
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// PATCH /api/admin/rifas/[id]
+// Actualizar una rifa
+// ─────────────────────────────────────────────
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  
+  if (!id) {
+    return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+  }
+
+  try {
+    const body = await req.json();
+
+    // Preparar el payload de actualización
+    const updateData: any = {};
+    
+    if (body.title !== undefined) updateData.title = body.title;
+    if (body.description !== undefined) updateData.description = body.description;
+    if (body.price !== undefined) updateData.price = Number(body.price);
+    if (body.total_tickets !== undefined) updateData.total_tickets = Number(body.total_tickets);
+    if (body.status !== undefined) updateData.status = body.status;
+    if (body.banner_url !== undefined) updateData.banner_url = body.banner_url;
+    if (body.bank_instructions !== undefined) updateData.bank_instructions = body.bank_instructions;
+    if (body.media !== undefined) updateData.media = body.media;
+
+    const { data, error } = await admin
+      .from("raffles")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, raffle: data });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: "Error interno", details: e?.message },
+      { status: 500 }
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // DELETE /api/admin/rifas/[id]
 // Borra: media normalizada, instituciones, órdenes (si existen),
 // y archivos del bucket "raffles/raffles/{id}/..."
+// ─────────────────────────────────────────────
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -38,8 +128,7 @@ export async function DELETE(
       );
     }
 
-    // 2) Borrar hijos conocidos (ajusta según tu esquema)
-    //    No fallar si una tabla no existe; si hay FKs, borra hijos primero.
+    // 2) Borrar hijos conocidos
     const stepErrors: string[] = [];
 
     // Galería normalizada
@@ -54,19 +143,16 @@ export async function DELETE(
       if (error) stepErrors.push(`bank_institutions: ${error.message}`);
     }
 
-    // Órdenes / reservas (si tu tabla se llama distinto, cámbialo aquí)
+    // Órdenes / reservas
     {
       const { error } = await admin.from("orders").delete().eq("raffle_id", id);
       if (error && !/relation .* does not exist/i.test(error.message)) {
-        // omite si la tabla no existe; si existe y falla, lo reportamos
         stepErrors.push(`orders: ${error.message}`);
       }
     }
 
-    // 3) Eliminar archivos del Storage (bucket "raffles")
-    //    Ruta usada en tus subidas: raffles/${id}/<archivo>
+    // 3) Eliminar archivos del Storage
     async function deleteFolderRecursive(prefix: string) {
-      // Listar nivel actual
       const { data: list, error: listErr } = await admin
         .storage
         .from("raffles")
@@ -79,10 +165,8 @@ export async function DELETE(
 
       for (const entry of list) {
         if (entry.name && entry.id && !entry.metadata) {
-          // archivo
           files.push(`${prefix}/${entry.name}`.replace(/^\/+/, ""));
         } else if (entry.name && entry.id === null) {
-          // carpeta (en supabase-js v2: id null suele indicar folder)
           folders.push(`${prefix}/${entry.name}`.replace(/^\/+/, ""));
         }
       }
@@ -91,7 +175,6 @@ export async function DELETE(
         await admin.storage.from("raffles").remove(files);
       }
 
-      // bajar por subcarpetas
       for (const f of folders) {
         await deleteFolderRecursive(f);
       }
@@ -105,7 +188,7 @@ export async function DELETE(
       return NextResponse.json({ ok: false, error: delErr.message }, { status: 400 });
     }
 
-    // 5) Devolver resultado (incluye slug borrado por si quieres registrar algo en UI)
+    // 5) Devolver resultado
     return NextResponse.json({ ok: true, deleted_id: id, slug: raffle.slug });
   } catch (e: any) {
     return NextResponse.json(

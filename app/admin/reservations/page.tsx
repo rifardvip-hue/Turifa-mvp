@@ -95,7 +95,7 @@ export default function AdminReservationsPage() {
   // ---------- cargar rifas para el selector ----------
   async function loadRaffles() {
     try {
-      const res = await fetch("/api/admin/raffles", { cache: "no-store" });
+      const res = await fetch("/api/admin/rifas", { cache: "no-store" });
       const j = await res.json().catch(() => null);
       if (res.ok && j?.ok && Array.isArray(j.items)) {
         const opts: RaffleOption[] = j.items.map((r: any) => ({

@@ -12,15 +12,30 @@ const admin = createClient(
 
 const BUCKET = "raffles";
 
-export async function POST(req: Request, context: any) {
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    const raffleId = String(context?.params?.id || "");
-    if (!raffleId) {
-      return NextResponse.json({ ok: false, error: "Falta raffle id" }, { status: 400 });
+    const { id: bankId } = await params;
+    
+    if (!bankId) {
+      return NextResponse.json({ ok: false, error: "Falta bank id" }, { status: 400 });
+    }
+
+    const { data: bank, error: bankError } = await admin
+      .from("bank_institutions")
+      .select("id, raffle_id")
+      .eq("id", bankId)
+      .single();
+
+    if (bankError || !bank) {
+      return NextResponse.json({ ok: false, error: "Banco no encontrado" }, { status: 404 });
     }
 
     const form = await req.formData();
     const file = form.get("file") as File | null;
+
     if (!file) {
       return NextResponse.json({ ok: false, error: "Falta archivo" }, { status: 400 });
     }
@@ -30,8 +45,8 @@ export async function POST(req: Request, context: any) {
       return NextResponse.json({ ok: false, error: "El archivo debe ser una imagen" }, { status: 415 });
     }
 
-    const ext = type.split("/")[1] || "jpg";
-    const key = `raffles/${raffleId}/banner-${randomUUID()}.${ext}`;
+    const ext = type.split("/")[1] || "png";
+    const key = `raffles/${bank.raffle_id}/banks/logo-${randomUUID()}.${ext}`;
 
     const arrayBuffer = await file.arrayBuffer();
     const { error: upErr } = await admin.storage
@@ -44,23 +59,21 @@ export async function POST(req: Request, context: any) {
 
     const { data: pub } = admin.storage.from(BUCKET).getPublicUrl(key);
     const publicUrl = pub?.publicUrl;
+
     if (!publicUrl) {
       return NextResponse.json({ ok: false, error: "No se pudo generar URL pública" }, { status: 500 });
     }
 
-    // (Opcional) si tienes un RPC para reemplazar banner:
-    const { error: trxError } = await admin.rpc("replace_banner_for_raffle", {
-      raffle_id_param: raffleId,
-      banner_url_param: publicUrl,
-    });
-    if (trxError) {
-      // si no existe el RPC en tu proyecto, puedes comentar este bloque
-      return NextResponse.json({ ok: false, error: `RPC: ${trxError.message}` }, { status: 500 });
+    const { error: updateErr } = await admin
+      .from("bank_institutions")
+      .update({ logo_url: publicUrl })
+      .eq("id", bankId);
+
+    if (updateErr) {
+      return NextResponse.json({ ok: false, error: updateErr.message }, { status: 500 });
     }
 
-    await admin.from("raffles").update({ banner_url: publicUrl }).eq("id", raffleId);
-
-    return NextResponse.json({ ok: true, banner_url: publicUrl });
+    return NextResponse.json({ ok: true, logo_url: publicUrl });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Error inesperado" }, { status: 500 });
   }

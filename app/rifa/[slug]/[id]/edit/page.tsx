@@ -37,7 +37,7 @@ export default function EditRafflePage() {
 
   async function loadRaffle() {
     // ✅ Usa la ruta admin por ID (tu GET ya la soporta y devuelve media.banner + gallery)
-    const res = await fetch(`/api/admin/raffles/${id}`, { cache: "no-store" });
+    const res = await fetch(`/api/admin/rifas/${id}`, { cache: "no-store" });
     const json = await res.json();
     if (json?.ok && json.raffle) {
       const r = json.raffle as Raffle;
@@ -127,7 +127,7 @@ export default function EditRafflePage() {
   async function saveRaffle() {
     if (!raffle) return;
     try {
-      const res = await fetch(`/api/admin/raffles/${raffle.id}`, {
+      const res = await fetch(`/api/admin/rifas/${raffle.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

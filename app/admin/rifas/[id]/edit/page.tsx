@@ -4,15 +4,6 @@ import { useParams, useRouter } from "next/navigation";
 import BannerUploader from "../_utils/BannerUploader";
 
 type GalleryItem = { id: string; type: "image" | "video"; url: string; order: number };
-type PaymentMethod = {
-  id: string;
-  name: string;
-  type: "transfer" | "zelle" | "card" | string;
-  account: string;
-  holder: string;
-  logo_url?: string | null;
-  order: number;
-};
 
 type Raffle = {
   id: string;
@@ -26,7 +17,6 @@ type Raffle = {
   media: {
     banner?: string | null;
     gallery: GalleryItem[];
-    payments?: PaymentMethod[];
   };
 };
 
@@ -41,10 +31,6 @@ type BankRow = {
   extra?: string | null;
   order?: number | null;
 };
-
-function uid() {
-  return "p_" + Math.random().toString(36).slice(2, 10);
-}
 
 export default function RaffleMediaEditor() {
   const { id } = useParams<{ id: string }>();
@@ -66,20 +52,16 @@ export default function RaffleMediaEditor() {
   // ------- LOADS -------
   async function load() {
     setLoading(true);
-    const res = await fetch(`/api/admin/raffles/${id}`, { cache: "no-store" });
+    const res = await fetch(`/api/admin/rifas/${id}`, { cache: "no-store" });
     const j = await res.json();
     setLoading(false);
     if (!res.ok || !j?.ok) return alert(j?.error || "No se pudo cargar");
     const r = j.raffle as Raffle;
-    if (!r.media) r.media = { banner: r.banner_url ?? null, gallery: [], payments: [] };
+    if (!r.media) r.media = { banner: r.banner_url ?? null, gallery: [] };
     if (!r.media.gallery) r.media.gallery = [];
-    if (!r.media.payments) r.media.payments = [];
     r.media.gallery = [...r.media.gallery]
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map((m, i) => ({ ...m, order: i }));
-    r.media.payments = [...r.media.payments]
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-      .map((p, i) => ({ ...p, order: i }));
     setRaffle(r);
   }
 
@@ -117,14 +99,17 @@ export default function RaffleMediaEditor() {
     setBusy(true);
     const fd = new FormData();
     for (const f of Array.from(files)) fd.append("files", f);
-    const res = await fetch(`/api/admin/raffles/${raffle.id}/media`, { method: "POST", body: fd });
-
+    const res = await fetch(`/api/admin/rifas/${raffle.id}/media`, {
+  method: "POST",
+  body: fd,
+  cache: "no-store", // 👈 evita que el navegador mezcle respuestas antiguas
+});
     // --- parseo robusto ---
     const ct = res.headers.get("content-type") || "";
     let j: any = null;
 
     if (res.status === 204) {
-      j = { ok: true, gallery: raffle.media.gallery }; // servidor no envió cuerpo
+      j = { ok: true, gallery: raffle.media.gallery };
     } else if (ct.includes("application/json")) {
       j = await res.json().catch(() => null);
     } else {
@@ -145,13 +130,34 @@ export default function RaffleMediaEditor() {
     e.target.value = "";
   }
 
-  function galleryRemove(id: string) {
-    if (!raffle) return;
-    const gallery = raffle.media.gallery
-      .filter(m => m.id !== id)
-      .map((m, i) => ({ ...m, order: i }));
-    setRaffle({ ...raffle, media: { ...raffle.media, gallery } });
+// 🔻 Reemplaza esta función en app/admin/rifas/[id]/edit/page.tsx
+async function galleryRemove(mediaId: string) {
+  if (!raffle?.id) return;
+
+  try {
+    const res = await fetch(
+      `/api/admin/rifas/${raffle.id}/media?media_id=${mediaId}`,
+      { method: "DELETE", cache: "no-store" }
+    );
+    const json = await res.json();
+
+    if (!res.ok || !json?.ok) {
+      alert(json?.error || "No se pudo eliminar el archivo");
+      return;
+    }
+
+    // ⚠️ IMPORTANTE: reemplazamos la lista con la que devuelve el back
+    setRaffle((prev) =>
+      prev
+        ? { ...prev, media: { ...prev.media, gallery: json.gallery ?? [] } }
+        : prev
+    );
+  } catch (e) {
+    console.error(e);
+    alert("Error al eliminar el archivo");
   }
+}
+
 
   function galleryMove(index: number, dir: "up" | "down") {
     if (!raffle) return;
@@ -163,83 +169,59 @@ export default function RaffleMediaEditor() {
     setRaffle({ ...raffle, media: { ...raffle.media, gallery } });
   }
 
-  // ------- BANNER -------
-  async function uploadBanner(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !raffle) return;
-    const fd = new FormData();
-    fd.append("file", file);
+  // ------- INSTITUCIONES BANCARIAS -------
+  // ✅ Crear institución directamente en DB
+  async function paymentsAdd() {
+    if (!raffle?.id) return;
+    
     setBusy(true);
-    const res = await fetch(`/api/admin/raffles/${raffle.id}/banner`, { method: "POST", body: fd });
-
-    // --- parseo robusto ---
-    const ct = res.headers.get("content-type") || "";
-    let j: any = null;
-    if (res.status === 204) {
-      j = { ok: true, banner_url: raffle.banner_url ?? null };
-    } else if (ct.includes("application/json")) {
-      j = await res.json().catch(() => null);
-    } else {
-      const txt = await res.text().catch(() => "");
-      j = txt ? { ok: false, error: txt } : null;
-    }
-
-    setBusy(false);
-    if (!res.ok || !j?.ok) return alert(j?.error || `Error HTTP ${res.status}`);
-
-    const newUrl = j.banner_url ?? raffle.banner_url ?? null;
-    setRaffle(prev =>
-      prev ? { ...prev, banner_url: newUrl, media: { ...prev.media, banner: newUrl } } : prev
-    );
-    e.target.value = "";
-  }
-
-  // ------- PAYMENTS (draft nuevos) -------
-  function paymentsAdd() {
-    if (!raffle) return;
-    const payments = [
-      ...((raffle.media.payments ?? []).map((p, i) => ({ ...p, order: i }))),
-      {
-        id: uid(),
-        name: "",
-        type: "transfer" as const,
-        account: "",
-        holder: "",
+    
+    try {
+      const payload = {
+        raffle_id: raffle.id,
+        method: "transfer",
+        name: "Nueva Institución",
+        account: null,
+        holder: null,
         logo_url: null,
-        order: raffle.media.payments?.length ?? 0,
-      },
-    ];
-    setRaffle({ ...raffle, media: { ...raffle.media, payments } });
+        extra: null,
+        order: banks.length,
+      };
+
+      const res = await fetch("/api/admin/bank-institutions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json?.ok) {
+        alert(json?.error || "Error al crear institución");
+        setBusy(false);
+        return;
+      }
+
+      await loadBanks();
+      
+      // Entrar en modo edición del nuevo banco
+      if (json.bank?.id || json.item?.id) {
+        const bankId = json.bank?.id || json.item?.id;
+        setEditingId(bankId);
+        setDraftBank(json.bank || json.item);
+      }
+
+      setBusy(false);
+    } catch (error: any) {
+      console.error("Error en paymentsAdd:", error);
+      alert("Error al crear institución");
+      setBusy(false);
+    }
   }
 
-  function paymentsRemove(idx: number) {
-    if (!raffle) return;
-    const payments = (raffle.media.payments ?? [])
-      .filter((_, i) => i !== idx)
-      .map((p, i) => ({ ...p, order: i }));
-    setRaffle({ ...raffle, media: { ...raffle.media, payments } });
-  }
-
-  function paymentsMove(index: number, dir: "up" | "down") {
-    if (!raffle) return;
-    const list = [...(raffle.media.payments ?? [])];
-    const t = dir === "up" ? index - 1 : index + 1;
-    if (t < 0 || t >= list.length) return;
-    [list[index], list[t]] = [list[t], list[index]];
-    const payments = list.map((p, i) => ({ ...p, order: i }));
-    setRaffle({ ...raffle, media: { ...raffle.media, payments } });
-  }
-
-  function paymentsEdit<K extends keyof PaymentMethod>(idx: number, key: K, value: PaymentMethod[K]) {
-    if (!raffle) return;
-    const list = [...(raffle.media.payments ?? [])];
-    list[idx] = { ...list[idx], [key]: value };
-    setRaffle({ ...raffle, media: { ...raffle.media, payments: list } });
-  }
-
-  // ✅ CORREGIDO: abrir selector y subir logo
-  async function paymentsUploadLogo(idx: number) {
-    if (!raffle) return;
+  // ✅ Subir logo de banco guardado
+  async function uploadBankLogo(bankId: string) {
+    if (!raffle?.id) return;
 
     const input = document.createElement("input");
     input.type = "file";
@@ -251,37 +233,41 @@ export default function RaffleMediaEditor() {
 
       setBusy(true);
       const fd = new FormData();
-      fd.append("files", file);
+      fd.append("file", file);
 
-      const res = await fetch(`/api/admin/raffles/${raffle.id}/media`, {
-        method: "POST",
-        body: fd,
-      });
+      try {
+        const res = await fetch(`/api/admin/bank-institutions/${bankId}/logo`, {
+          method: "POST",
+          body: fd,
+        });
 
-      // --- parseo robusto ---
-      const ct = res.headers.get("content-type") || "";
-      let j: any = null;
-      if (ct.includes("application/json")) {
-        j = await res.json().catch(() => null);
-      } else {
-        const txt = await res.text().catch(() => "");
-        j = { ok: false, error: txt || "Respuesta no-JSON" };
+        const json = await res.json();
+
+        if (!res.ok || !json?.ok) {
+          alert(json?.error || "Error al subir logo");
+          setBusy(false);
+          return;
+        }
+
+        // Actualizar el logo en el draft si está editando
+        if (editingId === bankId && json.logo_url) {
+          setDraftBank((d) => ({ ...d, logo_url: json.logo_url }));
+        }
+
+        // Recargar bancos
+        await loadBanks();
+        setBusy(false);
+      } catch (error: any) {
+        console.error("Error subiendo logo:", error);
+        alert("Error al subir logo");
+        setBusy(false);
       }
-
-      setBusy(false);
-
-      if (!res.ok || !j?.ok || !Array.isArray(j.gallery) || j.gallery.length === 0) {
-        return alert(j?.error || `Error HTTP ${res.status}`);
-      }
-
-      const last = j.gallery[j.gallery.length - 1];
-      paymentsEdit(idx, "logo_url", last.url);
     };
 
-    // 👇 esto faltaba
     input.click();
   }
 
+  // ✅ Guardar cambios en la rifa (sin payments)
   async function saveRaffle() {
     if (!raffle) return;
     setBusy(true);
@@ -297,17 +283,17 @@ export default function RaffleMediaEditor() {
         media: {
           banner: raffle.banner_url ?? raffle.media?.banner ?? null,
           gallery: raffle.media?.gallery || [],
-          payments: raffle.media?.payments || [],
+          // ✅ NO guardar payments aquí - se manejan por separado en bank_institutions
         },
       };
 
-      const res = await fetch(`/api/admin/raffles/${raffle.id}`, {
+      const res = await fetch(`/api/admin/rifas/${raffle.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      // Revalidación “best effort”
+      // Revalidación "best effort"
       try {
         await fetch(`/api/revalidate?path=/rifa/${raffle.slug}`, { method: "POST" });
       } catch {}
@@ -333,49 +319,81 @@ export default function RaffleMediaEditor() {
     setEditingId(b.id);
     setDraftBank({ ...b });
   }
+  
   function cancelEdit() {
     setEditingId(null);
     setDraftBank({});
   }
 
+  // ✅ Actualizar banco usando endpoint correcto
   async function updateBank() {
     if (!raffle?.id || !editingId) return;
+    
+    setBusy(true);
+    
     const payload = {
-      id: editingId,
       name: (draftBank.name ?? "").trim(),
-      type: (draftBank.method ?? "transfer") as any,
+      method: (draftBank.method ?? "transfer") as any,
       account: (draftBank.account ?? "") || null,
       holder: (draftBank.holder ?? "") || null,
       logo_url: draftBank.logo_url ?? null,
+      extra: (draftBank.extra ?? "") || null,
       order: typeof draftBank.order === "number" ? draftBank.order : 0,
     };
-    const res = await fetch(`/api/admin/raffles/${raffle.id}/media`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bank: payload }),
-    });
-    const j = await res.json();
-    if (!res.ok || !j?.ok) {
-      alert(j?.error || "No se pudo actualizar la institución");
-      return;
+
+    try {
+      const res = await fetch(`/api/admin/bank-institutions/${editingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json?.ok) {
+        alert(json?.error || "Error al actualizar");
+        setBusy(false);
+        return;
+      }
+
+      await loadBanks();
+      cancelEdit();
+      setBusy(false);
+    } catch (error: any) {
+      console.error("Error en updateBank:", error);
+      alert("Error al actualizar institución");
+      setBusy(false);
     }
-    await loadBanks();
-    cancelEdit();
   }
 
+  // ✅ Eliminar banco usando endpoint correcto
   async function deleteBank(bankId: string) {
     if (!raffle?.id) return;
     if (!confirm("¿Eliminar esta institución?")) return;
-    const res = await fetch(`/api/admin/raffles/${raffle.id}/media?bank_id=${bankId}`, {
-      method: "DELETE",
-    });
-    const j = await res.json();
-    if (!res.ok || !j?.ok) {
-      alert(j?.error || "No se pudo eliminar la institución");
-      return;
+    
+    setBusy(true);
+    
+    try {
+      const res = await fetch(`/api/admin/bank-institutions/${bankId}`, {
+        method: "DELETE",
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json?.ok) {
+        alert(json?.error || "No se pudo eliminar la institución");
+        setBusy(false);
+        return;
+      }
+
+      await loadBanks();
+      if (editingId === bankId) cancelEdit();
+      setBusy(false);
+    } catch (error: any) {
+      console.error("Error en deleteBank:", error);
+      alert("Error al eliminar institución");
+      setBusy(false);
     }
-    await loadBanks();
-    if (editingId === bankId) cancelEdit();
   }
 
   if (loading || !raffle) return <div className="p-6 text-gray-300">Cargando…</div>;
@@ -466,216 +484,157 @@ export default function RaffleMediaEditor() {
             <h2 className="text-white font-bold">Instituciones bancarias</h2>
             <button
               onClick={paymentsAdd}
-              className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-xl font-semibold"
+              disabled={busy}
+              className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-xl font-semibold disabled:opacity-50"
             >
               + Agregar institución
             </button>
           </div>
 
           {/* Lista DB con editar/eliminar */}
-          <div className="mb-5">
-            <h3 className="text-sm font-semibold text-gray-300 mb-2">Instituciones guardadas (DB)</h3>
-            <div className="rounded-xl border border-gray-700 bg-black/30 p-3">
-              {loadingBanks ? (
-                <div className="text-gray-400 text-sm">Cargando instituciones…</div>
-              ) : banks.length === 0 ? (
-                <div className="text-gray-500 text-sm">No hay instituciones agregadas</div>
-              ) : (
-                <ul className="space-y-2">
-                  {banks.map((b) => {
-                    const isEditing = editingId === b.id;
-                    return (
-                      <li key={b.id} className="bg-gray-800/50 rounded-lg p-3">
-                        {isEditing ? (
-                          <div className="grid sm:grid-cols-5 gap-2 items-start">
+          <div className="rounded-xl border border-gray-700 bg-black/30 p-3">
+            {loadingBanks ? (
+              <div className="text-gray-400 text-sm">Cargando instituciones…</div>
+            ) : banks.length === 0 ? (
+              <div className="text-gray-500 text-sm">No hay instituciones agregadas</div>
+            ) : (
+              <ul className="space-y-2">
+                {banks.map((b) => {
+                  const isEditing = editingId === b.id;
+                  return (
+                    <li key={b.id} className="bg-gray-800/50 rounded-lg p-3">
+                      {isEditing ? (
+                        <div className="space-y-3">
+                          {/* Nombre */}
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1">Nombre</label>
                             <input
                               value={String(draftBank.name ?? "")}
                               onChange={(e) => setDraftBank((d) => ({ ...d, name: e.target.value }))}
-                              className="px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
-                              placeholder="Nombre"
+                              className="w-full px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
+                              placeholder="Banco BHD"
                             />
+                          </div>
+
+                          {/* Método */}
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1">Método</label>
                             <select
                               value={String(draftBank.method ?? "transfer")}
-                              onChange={(e) => setDraftBank((d) => ({ ...d, method: e.target.value }))}
-                              className="px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
+                              onChange={(e) => setDraftBank((d) => ({ ...d, method: e.target.value as any }))}
+                              className="w-full px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
                             >
                               <option value="transfer">Transferencia</option>
                               <option value="zelle">Zelle</option>
                               <option value="card">Tarjeta</option>
                             </select>
+                          </div>
+
+                          {/* Cuenta */}
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1">Número de cuenta</label>
                             <input
                               value={String(draftBank.account ?? "")}
                               onChange={(e) => setDraftBank((d) => ({ ...d, account: e.target.value }))}
-                              className="px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
-                              placeholder="Cuenta / Email"
+                              className="w-full px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
+                              placeholder="1234567890"
                             />
+                          </div>
+
+                          {/* Titular */}
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1">Titular</label>
                             <input
                               value={String(draftBank.holder ?? "")}
                               onChange={(e) => setDraftBank((d) => ({ ...d, holder: e.target.value }))}
-                              className="px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
-                              placeholder="Titular"
+                              className="w-full px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
+                              placeholder="Nombre del titular"
                             />
-                            <div className="flex gap-2 justify-end">
-                              <button
-                                onClick={updateBank}
-                                className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm"
-                              >
-                                Guardar
-                              </button>
-                              <button
-                                onClick={cancelEdit}
-                                className="px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-700 text-white text-sm"
-                              >
-                                Cancelar
-                              </button>
-                            </div>
                           </div>
-                        ) : (
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-3 min-w-0">
-                              {b.logo_url ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={b.logo_url} alt="" className="w-7 h-7 object-contain rounded" />
-                              ) : (
-                                <div className="w-7 h-7 rounded bg-gray-600" />
+
+                          {/* Logo */}
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1">Logo</label>
+                            <div className="flex items-center gap-3">
+                              {draftBank.logo_url && (
+                                <img 
+                                  src={draftBank.logo_url} 
+                                  className="w-12 h-12 object-contain bg-white/5 rounded-lg p-1" 
+                                  alt="logo" 
+                                />
                               )}
-                              <div className="min-w-0">
-                                <div className="text-white font-semibold truncate">
-                                  {b.name} <span className="text-xs text-gray-400">({b.method})</span>
-                                </div>
-                                <div className="text-xs text-gray-400 truncate">
-                                  {[b.account, b.holder].filter(Boolean).join(" • ")}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
                               <button
-                                onClick={() => startEdit(b)}
-                                className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm"
+                                type="button"
+                                onClick={() => uploadBankLogo(b.id)}
+                                disabled={busy}
+                                className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg disabled:opacity-50"
                               >
-                                Editar
-                              </button>
-                              <button
-                                onClick={() => deleteBank(b.id)}
-                                className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm"
-                              >
-                                Eliminar
+                                {draftBank.logo_url ? "Cambiar logo" : "Subir logo"}
                               </button>
                             </div>
                           </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
+
+                          {/* Botones */}
+                          <div className="flex gap-2 pt-2">
+                            <button
+                              onClick={updateBank}
+                              disabled={busy}
+                              className="flex-1 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium disabled:opacity-50"
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              onClick={cancelEdit}
+                              disabled={busy}
+                              className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-center gap-3 flex-1">
+                            {b.logo_url && (
+                              <img 
+                                src={b.logo_url} 
+                                className="w-12 h-12 object-contain bg-white/5 rounded-lg p-1" 
+                                alt="logo" 
+                              />
+                            )}
+                            <div className="flex-1">
+                              <div className="text-white font-semibold">{b.name}</div>
+                              <div className="text-sm text-gray-400">
+                                {b.method === "transfer" ? "Transferencia" : b.method === "zelle" ? "Zelle" : "Tarjeta"}
+                              </div>
+                              {b.account && <div className="text-xs text-gray-500 font-mono">{b.account}</div>}
+                              {b.holder && <div className="text-xs text-gray-500">{b.holder}</div>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => startEdit(b)}
+                              disabled={busy}
+                              className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm disabled:opacity-50"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => deleteBank(b.id)}
+                              disabled={busy}
+                              className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm disabled:opacity-50"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
-
-          {/* Editor de borradores (no guardados aún) */}
-          {(raffle.media.payments ?? []).length === 0 ? (
-            <div className="border-2 border-dashed border-gray-600 rounded-xl p-10 text-center text-gray-400">
-              No hay instituciones agregadas
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {(raffle.media.payments ?? []).map((p, i) => (
-                <div key={p.id} className="bg-black/30 rounded-xl p-4 border border-gray-700">
-                  <div className="flex items-start gap-4">
-                    <div className="w-24">
-                      <div className="w-24 h-24 bg-gray-800 rounded-lg flex items-center justify-center overflow-hidden border border-gray-700">
-                        {p.logo_url ? (
-                          <img src={p.logo_url} className="w-full h-full object-contain" alt="logo" />
-                        ) : (
-                          <span className="text-gray-500 text-sm">Sin logo</span>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => paymentsUploadLogo(i)}
-                        className="mt-2 w-full bg-gray-700 hover:bg-gray-600 text-white text-sm py-1.5 rounded-lg"
-                      >
-                        Subir logo
-                      </button>
-                    </div>
-
-                    <div className="flex-1 grid sm:grid-cols-2 gap-3">
-                      <div className="sm:col-span-2">
-                        <label className="block text-xs text-gray-400 mb-1">Nombre de la institución</label>
-                        <input
-                          value={p.name}
-                          onChange={(e) => paymentsEdit(i, "name", e.target.value)}
-                          className="w-full px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
-                          placeholder="Banco BHD / Banco Popular / Zelle, etc."
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs text-gray-400 mb-1">Tipo</label>
-                        <select
-                          value={p.type}
-                          onChange={(e) => paymentsEdit(i, "type", e.target.value)}
-                          className="w-full px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
-                        >
-                          <option value="transfer">Transferencia</option>
-                          <option value="zelle">Zelle</option>
-                          <option value="card">Tarjeta</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs text-gray-400 mb-1">
-                          {p.type === "zelle" ? "Email de Zelle" : "Número de cuenta"}
-                        </label>
-                        <input
-                          value={p.account}
-                          onChange={(e) => paymentsEdit(i, "account", e.target.value)}
-                          className="w-full px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
-                          placeholder={p.type === "zelle" ? "ej: usuario@correo.com" : "ej: 1234567890"}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs text-gray-400 mb-1">Titular</label>
-                        <input
-                          value={p.holder}
-                          onChange={(e) => paymentsEdit(i, "holder", e.target.value)}
-                          className="w-full px-3 py-2 bg-black/50 border border-gray-700 rounded-lg text-white"
-                          placeholder="Nombre del titular"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      <button
-                        onClick={() => paymentsMove(i, "up")}
-                        disabled={i === 0}
-                        className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-white rounded-lg disabled:opacity-30"
-                        title="Subir"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        onClick={() => paymentsMove(i, "down")}
-                        disabled={i === (raffle.media.payments?.length ?? 1) - 1}
-                        className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-white rounded-lg disabled:opacity-30"
-                        title="Bajar"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        onClick={() => paymentsRemove(i)}
-                        className="w-10 h-10 bg-red-600 hover:bg-red-700 text-white rounded-lg"
-                        title="Eliminar"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Galería */}
@@ -754,7 +713,7 @@ export default function RaffleMediaEditor() {
           )}
         </div>
 
-        {/* --- BLOQUE NUEVO: Subir Banner --- */}
+        {/* Banner */}
         <BannerUploader
           raffleId={raffle.id}
           initialBanner={raffle.media?.banner || raffle.banner_url || null}
@@ -787,13 +746,15 @@ export default function RaffleMediaEditor() {
         <div className="flex gap-4">
           <button
             onClick={saveRaffle}
-            className="flex-1 bg-gradient-to-r from-green-600 to-green-700 text-white py-4 rounded-xl font-bold text-lg"
+            disabled={busy}
+            className="flex-1 bg-gradient-to-r from-green-600 to-green-700 text-white py-4 rounded-xl font-bold text-lg disabled:opacity-50"
           >
-            💾 Guardar cambios
+            {busy ? "Guardando..." : "💾 Guardar cambios"}
           </button>
           <button
             onClick={() => router.push("/admin/rifas")}
-            className="px-6 bg-gray-700 text-white py-4 rounded-xl font-bold"
+            disabled={busy}
+            className="px-6 bg-gray-700 text-white py-4 rounded-xl font-bold disabled:opacity-50"
           >
             Cancelar
           </button>

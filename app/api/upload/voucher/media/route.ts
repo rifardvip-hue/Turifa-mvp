@@ -11,7 +11,8 @@ export const revalidate = 0;
 // Devuelve: { ok: true, url: string }
 export async function POST(req: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies: () => cookies() });
+    const supabase = cookieStore = await cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
     // (Opcional) si necesitas exigir sesión:
     // const { data: { session } } = await supabase.auth.getSession();

@@ -23,7 +23,7 @@ export default function BannerUploader({ raffleId, initialBanner = null, onChang
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`/api/admin/raffles/${raffleId}/banner`, {
+      const res = await fetch(`/api/admin/rifas/${raffleId}/banner`, {
         method: "POST",
         body: fd,
       });

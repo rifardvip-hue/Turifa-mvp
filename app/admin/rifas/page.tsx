@@ -36,7 +36,7 @@ export default function AdminRafflesPage() {
       setLoading(true);
       setErr(null);
 
-      const res = await fetch("/api/admin/raffles", { cache: "no-store" });
+const res = await fetch("/api/admin/rifas", { cache: "no-store" });
       const data = await res.json();
 
       if (!res.ok || !data?.ok) {
@@ -69,7 +69,7 @@ export default function AdminRafflesPage() {
   async function handleCreate() {
     try {
       setLoading(true);
-      const res = await fetch("/api/admin/raffles", {
+const res = await fetch("/api/admin/rifas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -79,11 +79,11 @@ export default function AdminRafflesPage() {
           status: "inactive",
         }),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.ok || !json?.id) {
-        throw new Error(json?.error || "No se pudo crear la rifa");
-      }
-      router.push(`/admin/rifas/${json.id}/edit`);
+    const json = await res.json().catch(() => ({}));
+if (!res.ok || !json?.ok || !json?.raffle?.id) {
+  throw new Error(json?.error || "No se pudo crear la rifa");
+}
+router.push(`/admin/rifas/${json.raffle.id}/edit`);
     } catch (e: any) {
       alert(e.message || "Error creando rifa");
       await loadRaffles();
@@ -102,7 +102,7 @@ export default function AdminRafflesPage() {
         prev.map((x) => (x.id === r.id ? { ...x, status: next } : x))
       );
 
-      const res = await fetch(`/api/admin/raffles/${r.id}`, {
+const res = await fetch(`/api/admin/rifas/${r.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: next }),

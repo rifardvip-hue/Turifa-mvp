@@ -13,8 +13,8 @@ export async function GET(_req: Request, context: any) {
   }
 
   // cookies() es síncrono en route handlers
-  const supabase = createRouteHandlerClient({ cookies: () => cookies() });
-
+  const cookieStore = await cookies();
+const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
   // Guard: admin
   const { data: { user } = { user: null } } = await supabase.auth.getUser();
   if (!user || user.user_metadata?.role !== "admin") {

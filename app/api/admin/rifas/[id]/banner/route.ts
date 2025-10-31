@@ -12,15 +12,20 @@ const admin = createClient(
 
 const BUCKET = "raffles";
 
-export async function POST(req: Request, context: any) {
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    const raffleId = String(context?.params?.id || "");
+    const { id: raffleId } = await params;
+    
     if (!raffleId) {
       return NextResponse.json({ ok: false, error: "Falta raffle id" }, { status: 400 });
     }
 
     const form = await req.formData();
     const file = form.get("file") as File | null;
+
     if (!file) {
       return NextResponse.json({ ok: false, error: "Falta archivo" }, { status: 400 });
     }
@@ -44,21 +49,20 @@ export async function POST(req: Request, context: any) {
 
     const { data: pub } = admin.storage.from(BUCKET).getPublicUrl(key);
     const publicUrl = pub?.publicUrl;
+
     if (!publicUrl) {
       return NextResponse.json({ ok: false, error: "No se pudo generar URL pública" }, { status: 500 });
     }
 
-    // (Opcional) si tienes un RPC para reemplazar banner:
-    const { error: trxError } = await admin.rpc("replace_banner_for_raffle", {
-      raffle_id_param: raffleId,
-      banner_url_param: publicUrl,
-    });
-    if (trxError) {
-      // si no existe el RPC en tu proyecto, puedes comentar este bloque
-      return NextResponse.json({ ok: false, error: `RPC: ${trxError.message}` }, { status: 500 });
-    }
+    // Actualizar banner en la tabla raffles
+    const { error: updateErr } = await admin
+      .from("raffles")
+      .update({ banner_url: publicUrl })
+      .eq("id", raffleId);
 
-    await admin.from("raffles").update({ banner_url: publicUrl }).eq("id", raffleId);
+    if (updateErr) {
+      return NextResponse.json({ ok: false, error: updateErr.message }, { status: 500 });
+    }
 
     return NextResponse.json({ ok: true, banner_url: publicUrl });
   } catch (e: any) {

@@ -1,83 +1,80 @@
-// app/api/rifas/by-slug/[slug]/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; // usa service role para evitar RLS en Vercel
-const supabase = createClient(url, serviceKey, { auth: { persistSession: false } });
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ slug: string }> }
+  req: NextRequest,
+  context: { params: { slug: string } }
 ) {
   try {
-    const { slug } = await params;
+    const slug = context.params.slug;
+
     if (!slug) {
-      return NextResponse.json({ ok: false, error: "slug requerido" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Slug requerido" },
+        { status: 400 }
+      );
     }
 
-    // Rifa + media + instituciones (ajusta los selects a tus columnas reales)
-    const { data: raffle, error } = await supabase
-      .from("raffles")
-      .select(`
-        id,
-        slug,
-        title,
-        description,
-        price,
-        bank_instructions,
-        banner_url,
-        raffle_media:raffle_media (
-          id, type, url, order
-        ),
-        bank_institutions:bank_institutions (
-          id, method, name, account, holder, logo_url, extra, "order"
-        )
-      `)
+    console.log("🔍 Buscando rifa con slug:", slug);
+
+    // 1. Buscar la rifa por slug
+    const { data: raffle, error: raffleError } = await supabase
+      .from("rifas")
+      .select("*")
       .eq("slug", slug)
-      .maybeSingle();
+      .single();
 
-    if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-    }
-    if (!raffle) {
-      return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+    if (raffleError || !raffle) {
+      console.error("❌ Error buscando rifa:", raffleError);
+      return NextResponse.json(
+        { ok: false, error: "Rifa no encontrada" },
+        { status: 404 }
+      );
     }
 
-    // Normaliza a la forma que espera el frontend (media.banner + media.gallery)
-    const gallery = (raffle.raffle_media || []).map((m: any) => ({
-      id: m.id,
-      type: m.type,
-      url: m.url,
-      order: m.order ?? 0,
-    }));
-    const payload = {
-      id: raffle.id,
-      slug: raffle.slug,
-      title: raffle.title,
-      description: raffle.description,
-      price: Number(raffle.price ?? 0),
-      bank_instructions: raffle.bank_instructions ?? null,
-      banner_url: raffle.banner_url ?? null,
-      media: {
-        banner: raffle.banner_url ?? null,
-        gallery,
-        logos: null,
+    console.log("✅ Rifa encontrada:", raffle.id);
+
+    // 2. Buscar las instituciones bancarias de esta rifa
+    const { data: institutions, error: instError } = await supabase
+      .from("bank_institutions")
+      .select("*")
+      .eq("raffle_id", raffle.id)
+      .order("order", { ascending: true });
+
+    if (instError) {
+      console.error("⚠️ Error cargando instituciones:", instError);
+      // No fallar si no hay instituciones, solo log
+    }
+
+    console.log("🏦 Instituciones encontradas:", institutions?.length || 0);
+
+    // 3. Construir respuesta completa
+    const response = {
+      ok: true,
+      raffle: {
+        ...raffle,
+        bank_institutions: institutions || [],
       },
-      bank_institutions: raffle.bank_institutions ?? [],
     };
 
-    return NextResponse.json({ ok: true, raffle: payload }, {
+    console.log("📦 Enviando respuesta con instituciones:", response.raffle.bank_institutions);
+
+    return NextResponse.json(response, {
       headers: {
-        "Cache-Control": "no-store",
-        "CDN-Cache-Control": "no-store",
-        "Vercel-CDN-Cache-Control": "no-store",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
       },
     });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "error" }, { status: 500 });
+  } catch (error: any) {
+    console.error("❌ Error en API:", error);
+    return NextResponse.json(
+      { ok: false, error: error.message || "Error del servidor" },
+      { status: 500 }
+    );
   }
 }

@@ -4,6 +4,7 @@ const nextConfig = {
   experimental: {
     serverActions: {
       allowedOrigins: ["*"],
+      bodySizeLimit: '10mb', // ⬅️ AGREGAR ESTA LÍNEA
     },
   },
 };

@@ -1,4 +1,4 @@
-// app/api/admin/raffles/route.ts
+// app/api/admin/rifas/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
