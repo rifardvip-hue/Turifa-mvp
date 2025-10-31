@@ -47,9 +47,10 @@ export default function RaffleMediaEditor() {
 
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
+  // ------ LOAD Raffle ------
   async function load() {
     setLoading(true);
-    const res = await fetch(\`/api/admin/rifas/\${id}\`, { cache: "no-store" });
+    const res = await fetch(`/api/admin/rifas/${id}`, { cache: "no-store" });
     const j = await res.json();
     setLoading(false);
     if (!res.ok || !j?.ok) return alert(j?.error || "No se pudo cargar");
@@ -62,11 +63,12 @@ export default function RaffleMediaEditor() {
     setRaffle(r);
   }
 
+  // ------ LOAD Banks ------
   async function loadBanks() {
     if (!id) return;
     try {
       setLoadingBanks(true);
-      const res = await fetch(\`/api/admin/bank-institutions?raffle_id=\${id}\`, { cache: "no-store" });
+      const res = await fetch(`/api/admin/bank-institutions?raffle_id=${id}`, { cache: "no-store" });
       const j = await res.json();
       if (j?.ok && Array.isArray(j.items)) {
         const items = [...j.items].sort(
@@ -86,15 +88,22 @@ export default function RaffleMediaEditor() {
   useEffect(() => {
     load();
     loadBanks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // ------ GALLERY: subir ------
   async function handleGalleryUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0 || !raffle) return;
     setBusy(true);
     const fd = new FormData();
     for (const f of Array.from(files)) fd.append("files", f);
-    const res = await fetch(\`/api/admin/rifas/\${raffle.id}/media\`, { method: "POST", body: fd });
+
+    const res = await fetch(`/api/admin/rifas/${raffle.id}/media`, {
+      method: "POST",
+      body: fd,
+      cache: "no-store",
+    });
 
     const ct = res.headers.get("content-type") || "";
     let j: any = null;
@@ -110,7 +119,7 @@ export default function RaffleMediaEditor() {
 
     setBusy(false);
     if (!res.ok || !j?.ok) {
-      return alert(j?.error || \`Error HTTP \${res.status}\`);
+      return alert(j?.error || ("Error HTTP " + res.status));
     }
 
     setRaffle(prev =>
@@ -121,34 +130,32 @@ export default function RaffleMediaEditor() {
     e.target.value = "";
   }
 
- // 🔻 Reemplaza esta función en app/admin/rifas/[id]/edit/page-new.tsx
-async function galleryRemove(mediaId: string) {
-  if (!raffle?.id) return;
+  // ------ GALLERY: eliminar (usa respuesta del backend) ------
+  async function galleryRemove(mediaId: string) {
+    if (!raffle?.id) return;
 
-  try {
-    const res = await fetch(
-      `/api/admin/rifas/${raffle.id}/media?media_id=${mediaId}`,
-      { method: "DELETE", cache: "no-store" }
-    );
-    const json = await res.json();
+    try {
+      const res = await fetch(
+        `/api/admin/rifas/${raffle.id}/media?media_id=${mediaId}`,
+        { method: "DELETE", cache: "no-store" }
+      );
+      const json = await res.json();
 
-    if (!res.ok || !json?.ok) {
-      alert(json?.error || "No se pudo eliminar el archivo");
-      return;
+      if (!res.ok || !json?.ok) {
+        alert(json?.error || "No se pudo eliminar el archivo");
+        return;
+      }
+
+      setRaffle((prev) =>
+        prev
+          ? { ...prev, media: { ...prev.media, gallery: json.gallery ?? [] } }
+          : prev
+      );
+    } catch (e) {
+      console.error(e);
+      alert("Error al eliminar el archivo");
     }
-
-    // ⚠️ Reemplaza la lista con la que devuelve el backend
-    setRaffle((prev) =>
-      prev
-        ? { ...prev, media: { ...prev.media, gallery: json.gallery ?? [] } }
-        : prev
-    );
-  } catch (e) {
-    console.error(e);
-    alert("Error al eliminar el archivo");
   }
-}
-
 
   function galleryMove(index: number, dir: "up" | "down") {
     if (!raffle) return;
@@ -160,6 +167,7 @@ async function galleryRemove(mediaId: string) {
     setRaffle({ ...raffle, media: { ...raffle.media, gallery } });
   }
 
+  // ------ Banks: crear ------
   async function paymentsAdd() {
     if (!raffle?.id) return;
     setBusy(true);
@@ -199,6 +207,7 @@ async function galleryRemove(mediaId: string) {
     }
   }
 
+  // ------ Banks: subir logo ------
   async function uploadBankLogo(bankId: string) {
     if (!raffle?.id) return;
     const input = document.createElement("input");
@@ -211,7 +220,7 @@ async function galleryRemove(mediaId: string) {
       const fd = new FormData();
       fd.append("file", file);
       try {
-        const res = await fetch(\`/api/admin/bank-institutions/\${bankId}/logo\`, {
+        const res = await fetch(`/api/admin/bank-institutions/${bankId}/logo`, {
           method: "POST",
           body: fd,
         });
@@ -235,6 +244,7 @@ async function galleryRemove(mediaId: string) {
     input.click();
   }
 
+  // ------ Guardar rifa ------
   async function saveRaffle() {
     if (!raffle) return;
     setBusy(true);
@@ -251,13 +261,13 @@ async function galleryRemove(mediaId: string) {
           gallery: raffle.media?.gallery || [],
         },
       };
-      const res = await fetch(\`/api/admin/rifas/\${raffle.id}\`, {
+      const res = await fetch(`/api/admin/rifas/${raffle.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       try {
-        await fetch(\`/api/revalidate?path=/rifa/\${raffle.slug}\`, { method: "POST" });
+        await fetch(`/api/revalidate?path=/rifa/${raffle.slug}`, { method: "POST" });
       } catch {}
       setBusy(false);
       if (!res.ok) {
@@ -270,20 +280,21 @@ async function galleryRemove(mediaId: string) {
       await loadBanks();
     } catch (error: any) {
       setBusy(false);
-      alert(\`❌ Error: \${error?.message || "Error desconocido"}\`);
+      alert("❌ Error: " + (error?.message || "Error desconocido"));
     }
   }
 
+  // ------ Banks: editar / cancelar ------
   function startEdit(b: BankRow) {
     setEditingId(b.id);
     setDraftBank({ ...b });
   }
-  
   function cancelEdit() {
     setEditingId(null);
     setDraftBank({});
   }
 
+  // ------ Banks: actualizar ------
   async function updateBank() {
     if (!raffle?.id || !editingId) return;
     setBusy(true);
@@ -297,7 +308,7 @@ async function galleryRemove(mediaId: string) {
       order: typeof draftBank.order === "number" ? draftBank.order : 0,
     };
     try {
-      const res = await fetch(\`/api/admin/bank-institutions/\${editingId}\`, {
+      const res = await fetch(`/api/admin/bank-institutions/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -318,12 +329,13 @@ async function galleryRemove(mediaId: string) {
     }
   }
 
+  // ------ Banks: eliminar ------
   async function deleteBank(bankId: string) {
     if (!raffle?.id) return;
     if (!confirm("¿Eliminar esta institución?")) return;
     setBusy(true);
     try {
-      const res = await fetch(\`/api/admin/bank-institutions/\${bankId}\`, {
+      const res = await fetch(`/api/admin/bank-institutions/${bankId}`, {
         method: "DELETE",
       });
       const json = await res.json();
@@ -486,19 +498,19 @@ async function galleryRemove(mediaId: string) {
             className="hidden"
             onChange={handleGalleryUpload}
           />
-  {raffle.media.gallery
-  .slice() // copia
-  .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) // ordena por "order"
-  .map((m, i) => (
-    <div key={m.id} className="flex gap-4 mb-2">
-      {m.type === "video" ? (
-        <video src={m.url} className="w-20 h-20 rounded" muted />
-      ) : (
-        <img src={m.url} className="w-20 h-20 rounded object-cover" alt="" />
-      )}
-      <button onClick={() => galleryRemove(m.id)} className="text-red-500">✕</button>
-    </div>
-  ))}
+          {raffle.media.gallery
+            .slice()
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+            .map((m) => (
+              <div key={m.id} className="flex gap-4 mb-2">
+                {m.type === "video" ? (
+                  <video src={m.url} className="w-20 h-20 rounded" muted />
+                ) : (
+                  <img src={m.url} className="w-20 h-20 rounded object-cover" alt="" />
+                )}
+                <button onClick={() => galleryRemove(m.id)} className="text-red-500">✕</button>
+              </div>
+            ))}
         </div>
 
         <button

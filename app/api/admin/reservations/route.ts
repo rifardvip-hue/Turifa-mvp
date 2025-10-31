@@ -8,9 +8,8 @@ import { cookies } from "next/headers";
  * para obtener slug y price. Calcula amount_cents = price * quantity.
  */
 export async function GET(req: Request) {
-const cookieStore = await cookies();
+const cookieStore = cookies();
 const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") || "").trim();
   const status = (searchParams.get("status") || "").trim(); // "", "pending_review", "confirmed", "rejected"

@@ -11,8 +11,8 @@ export const revalidate = 0;
 // Devuelve: { ok: true, url: string }
 export async function POST(req: Request) {
   try {
-    // ✅ crear cookieStore y supabase correctamente (una sola vez)
-    const cookieStore = await cookies();
+    // ✅ Forma correcta: obtener cookieStore y pasarlo como closure
+    const cookieStore = cookies();
     const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
     const form = await req.formData();
@@ -24,31 +24,30 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-
-    const mime = (file.type || "").toLowerCase() || "image/jpeg";
-    if (!mime.startsWith("image/")) {
+    if (!file.type?.toLowerCase().startsWith("image/")) {
       return NextResponse.json(
         { ok: false, error: "El archivo debe ser una imagen" },
         { status: 415 }
       );
     }
 
-    // 🧩 nombre seguro + ruta dentro del bucket "vouchers"
-    const originalBase =
-      file.name.split(".").slice(0, -1).join(".") || "voucher";
-    const safeBase = originalBase.replace(/\s+/g, "-").replace(/[^\w.-]/g, "");
-    const ext = mime.split("/")[1] || "jpg";
-    const objectPath = `uploads/${Date.now()}-${Math.random()
+    // construimos ruta segura dentro del bucket "vouchers"
+    const orig = file.name || "voucher.jpg";
+    const ext = orig.includes(".") ? orig.split(".").pop()!.toLowerCase() : "jpg";
+    const base = orig.replace(/\s+/g, "-").replace(/[^\w.-]/g, "");
+    const filePath = `vouchers/${Date.now()}-${Math.random()
       .toString(36)
-      .slice(2, 8)}-${safeBase}.${ext}`;
+      .slice(2, 8)}-${base}.${ext}`;
 
     const bytes = new Uint8Array(await file.arrayBuffer());
 
-    // ✅ sube al bucket "vouchers" usando la ruta relativa (sin duplicar el nombre del bucket)
+    // ✅ En Supabase Storage: el filePath NO debe repetir el nombre del bucket
+    const storageKey = filePath.replace(/^vouchers\//, "");
+
     const { error: upErr } = await supabase.storage
       .from("vouchers")
-      .upload(objectPath, bytes, {
-        contentType: mime,
+      .upload(storageKey, bytes, {
+        contentType: file.type || "image/jpeg",
         upsert: false,
       });
 
@@ -59,12 +58,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ URL pública del mismo objeto subido
-    const { data } = supabase.storage
-      .from("vouchers")
-      .getPublicUrl(objectPath);
+    const { data } = supabase.storage.from("vouchers").getPublicUrl(storageKey);
     const url = data?.publicUrl;
-
     if (!url) {
       return NextResponse.json(
         { ok: false, error: "No se pudo generar URL pública" },
