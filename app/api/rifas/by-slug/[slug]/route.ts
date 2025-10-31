@@ -1,21 +1,20 @@
-// app/api/rifas/by-slug/[[slug]]/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const runtime = "nodejs"; // ← importante si usas Node APIs
 
-const supabase = createClient(
+const admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function GET(req: Request, context: any) {
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ slug: string }> }
+) {
   try {
-    // En [[slug]] el parámetro puede venir undefined
-    const raw = context?.params?.slug;
-    const slug = typeof raw === "string" ? raw : "";
+    const { slug } = await params;
 
     if (!slug) {
       return NextResponse.json(
@@ -24,48 +23,47 @@ export async function GET(req: Request, context: any) {
       );
     }
 
-    // 1) Buscar rifa por slug
-    const { data: raffle, error: raffleError } = await supabase
+    console.log("🔍 Buscando rifa con slug:", slug);
+
+    const { data: raffle, error: raffleError } = await admin
       .from("rifas")
       .select("*")
       .eq("slug", slug)
       .single();
 
     if (raffleError || !raffle) {
+      console.error("❌ Error buscando rifa:", raffleError);
       return NextResponse.json(
         { ok: false, error: "Rifa no encontrada" },
         { status: 404 }
       );
     }
 
-    // 2) Instituciones bancarias de esa rifa
-    const { data: institutions, error: instError } = await supabase
+    console.log("✅ Rifa encontrada:", raffle.id);
+
+    const { data: institutions, error: instError } = await admin
       .from("bank_institutions")
       .select("*")
       .eq("raffle_id", raffle.id)
       .order("order", { ascending: true });
 
-    const bank_institutions = instError ? [] : (institutions ?? []);
+    if (instError) {
+      console.error("⚠️ Error cargando instituciones:", instError);
+    }
 
-    // 3) Respuesta
-    return NextResponse.json(
-      {
-        ok: true,
-        raffle: {
-          ...raffle,
-          bank_institutions,
-        },
+    console.log("🏦 Instituciones encontradas:", institutions?.length || 0);
+
+    return NextResponse.json({
+      ok: true,
+      raffle: {
+        ...raffle,
+        bank_institutions: institutions || [],
       },
-      {
-        headers: {
-          "Cache-Control": "no-store, no-cache, must-revalidate",
-          Pragma: "no-cache",
-        },
-      }
-    );
-  } catch (error: any) {
+    });
+  } catch (e: any) {
+    console.error("❌ Error en API:", e);
     return NextResponse.json(
-      { ok: false, error: error?.message || "Error del servidor" },
+      { ok: false, error: e?.message || "Error del servidor" },
       { status: 500 }
     );
   }
